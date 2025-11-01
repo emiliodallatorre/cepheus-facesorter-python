@@ -155,6 +155,9 @@ def get_cluster_details(cluster_id):
                 'file_path': str(face['original_image_path'])
             })
     
+    # Sort by distance descending - faces with highest distance (outliers) appear first
+    face_data.sort(key=lambda x: x['distance'], reverse=True)
+    
     return jsonify({
         'cluster_id': int(cluster_id),
         'faces': face_data,
@@ -277,8 +280,9 @@ def scan_faces():
     detector = FaceDetector()
     recognizer = FaceRecognizer()
     
-    # Find all images
-    image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.gif', '*.tiff']
+    # Find all images recursively (case-insensitive)
+    image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.gif', '*.tiff',
+                       '*.JPG', '*.JPEG', '*.PNG', '*.BMP', '*.GIF', '*.TIFF']
     image_paths = []
     for ext in image_extensions:
         image_paths.extend(glob.glob(os.path.join(directory, '**', ext), recursive=True))
