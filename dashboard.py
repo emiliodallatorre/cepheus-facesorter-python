@@ -372,7 +372,7 @@ def scan_faces():
                 bar_length = 40
                 filled = int(bar_length * idx / len(image_paths))
                 bar = '█' * filled + '░' * (bar_length - filled)
-                print(f"\r[{bar}] {progress_percent}% | {idx}/{len(image_paths)} | 👤 {stats['faces_found']} faces | {filename[:30]:<30}", end='', flush=True)
+                print(f"\r[{bar}] {progress_percent}% | {idx}/{len(image_paths)} | {stats['faces_found']} faces | {filename[:30]:<30}", end='', flush=True)
             
             # Send progress update to frontend
             if session_id and idx % 5 == 0:  # Update every 5 images to avoid flooding
@@ -614,6 +614,17 @@ def export_faces():
 
 def run_dashboard(host='127.0.0.1', port=5000, debug=True):
     """Run the Flask dashboard."""
+    print("\n" + "="*70)
+    print("Face Sorter Dashboard Starting...")
+    print("="*70)
+    print(f"Server: http://{host}:{port}")
+    print(f"Debug Mode: {'ON' if debug else 'OFF'}")
+    print(f"Auto-Reload: OFF (manual restart required for code changes)")
+    print("="*70)
+    print("Dashboard ready! Open the URL above in your browser.")
+    print("Press Ctrl+C to stop the server")
+    print("="*70 + "\n")
+    
     # Disable reloader to allow code editing without restart
     app.run(host=host, port=port, debug=debug, use_reloader=False)
 

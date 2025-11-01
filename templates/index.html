@@ -1202,6 +1202,42 @@
         loadStats();
         loadClusters();
         
+        // Load saved settings from localStorage
+        function loadSavedSettings() {
+            const photoDirectory = localStorage.getItem('photoDirectory');
+            const clusterThreshold = localStorage.getItem('clusterThreshold');
+            const minClusterSize = localStorage.getItem('minClusterSize');
+            
+            if (photoDirectory) {
+                document.getElementById('photoDirectory').value = photoDirectory;
+            }
+            if (clusterThreshold) {
+                document.getElementById('clusterThreshold').value = clusterThreshold;
+            }
+            if (minClusterSize) {
+                document.getElementById('minClusterSize').value = minClusterSize;
+            }
+        }
+        
+        // Save settings to localStorage
+        function saveSettings() {
+            const photoDirectory = document.getElementById('photoDirectory').value;
+            const clusterThreshold = document.getElementById('clusterThreshold').value;
+            const minClusterSize = document.getElementById('minClusterSize').value;
+            
+            localStorage.setItem('photoDirectory', photoDirectory);
+            localStorage.setItem('clusterThreshold', clusterThreshold);
+            localStorage.setItem('minClusterSize', minClusterSize);
+        }
+        
+        // Attach event listeners to save on change
+        document.getElementById('photoDirectory').addEventListener('change', saveSettings);
+        document.getElementById('clusterThreshold').addEventListener('change', saveSettings);
+        document.getElementById('minClusterSize').addEventListener('change', saveSettings);
+        
+        // Load saved settings on page load
+        loadSavedSettings();
+        
         // Refresh every 30 seconds
         setInterval(() => {
             loadStats();
