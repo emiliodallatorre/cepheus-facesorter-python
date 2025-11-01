@@ -64,6 +64,46 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/api/image/full/<int:face_id>')
+def get_full_image(face_id):
+    """Get the full original image for a face."""
+    db = get_db()
+    face = db.get_face_by_id(face_id)
+    
+    if not face:
+        return jsonify({'error': 'Face not found'}), 404
+    
+    image_path = face['original_image_path']
+    
+    if not os.path.exists(image_path):
+        return jsonify({'error': 'Image file not found'}), 404
+    
+    try:
+        # Read and encode the full image
+        image = cv2.imread(image_path)
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        
+        # Get face coordinates to draw box
+        x, y, w, h = face['face_coordinates']
+        
+        # Draw a box around the face
+        cv2.rectangle(image_rgb, (x, y), (x+w, y+h), (102, 126, 234), 3)
+        
+        # Convert to base64
+        pil_img = Image.fromarray(image_rgb)
+        buffer = BytesIO()
+        pil_img.save(buffer, format='JPEG', quality=95)
+        img_str = base64.b64encode(buffer.getvalue()).decode()
+        
+        return jsonify({
+            'image': f"data:image/jpeg;base64,{img_str}",
+            'path': image_path,
+            'coordinates': {'x': x, 'y': y, 'w': w, 'h': h}
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/stats')
 def get_stats():
     """Get database statistics."""
@@ -359,7 +399,7 @@ def scan_faces():
         })
     
     print(f"\n{'='*60}")
-    print(f"🔍 Starting face scan of {len(image_paths)} images")
+    print(f"Starting face scan of {len(image_paths)} images")
     print(f"{'='*60}\n")
     
     for idx, img_path in enumerate(image_paths):
@@ -371,7 +411,7 @@ def scan_faces():
                 progress_percent = int((idx / len(image_paths)) * 100)
                 bar_length = 40
                 filled = int(bar_length * idx / len(image_paths))
-                bar = '█' * filled + '░' * (bar_length - filled)
+                bar = '#' * filled + '-' * (bar_length - filled)
                 print(f"\r[{bar}] {progress_percent}% | {idx}/{len(image_paths)} | {stats['faces_found']} faces | {filename[:30]:<30}", end='', flush=True)
             
             # Send progress update to frontend
@@ -424,17 +464,17 @@ def scan_faces():
             
         except Exception as e:
             stats['errors'] += 1
-            print(f"\n❌ Error processing {img_path}: {e}")
+            print(f"\nERROR processing {img_path}: {e}")
     
     # Final terminal output
     print(f"\n\n{'='*60}")
-    print(f"✅ Scan Complete!")
+    print(f"Scan Complete!")
     print(f"{'='*60}")
-    print(f"📊 Total images:  {stats['total_images']}")
-    print(f"✔️  Processed:     {stats['processed']}")
-    print(f"👤 Faces found:   {stats['faces_found']}")
-    print(f"⏭️  Skipped:       {stats['skipped']}")
-    print(f"❌ Errors:        {stats['errors']}")
+    print(f"Total images:  {stats['total_images']}")
+    print(f"Processed:     {stats['processed']}")
+    print(f"Faces found:   {stats['faces_found']}")
+    print(f"Skipped:       {stats['skipped']}")
+    print(f"Errors:        {stats['errors']}")
     print(f"{'='*60}\n")
     
     # Send completion

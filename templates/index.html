@@ -140,6 +140,12 @@
             height: 140px;
             object-fit: cover;
             border-radius: 8px;
+            transition: transform 0.2s, opacity 0.2s;
+        }
+        
+        .face-item img:hover {
+            transform: scale(1.05);
+            opacity: 0.9;
         }
         
         .badge-custom {
@@ -530,6 +536,24 @@
         </div>
     </div>
 
+    <!-- Modal for full image viewer -->
+    <div class="modal fade" id="imageViewerModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-image me-2"></i>Full Image Context
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img id="full-image-view" src="" alt="Full Image" style="max-width: 100%; height: auto; border-radius: 8px;">
+                    <p class="text-muted mt-3 mb-0" id="full-image-path"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     
@@ -540,13 +564,14 @@
         let selectedFaceForAssignment = null;
 
         // Bootstrap modal instances
-        let clusterModal, unlabeledModal, exportModal, personModal;
+        let clusterModal, unlabeledModal, exportModal, personModal, imageViewerModal;
 
         document.addEventListener('DOMContentLoaded', function() {
             clusterModal = new bootstrap.Modal(document.getElementById('clusterModal'));
             unlabeledModal = new bootstrap.Modal(document.getElementById('unlabeledFacesModal'));
             exportModal = new bootstrap.Modal(document.getElementById('exportModal'));
             personModal = new bootstrap.Modal(document.getElementById('personModal'));
+            imageViewerModal = new bootstrap.Modal(document.getElementById('imageViewerModal'));
         });
 
         // Load statistics
@@ -615,6 +640,26 @@
             });
         }
 
+        // View full image with context
+        async function viewFullImage(faceId) {
+            try {
+                const response = await fetch(`/api/image/full/${faceId}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert(`Error: ${data.error}`);
+                    return;
+                }
+                
+                document.getElementById('full-image-view').src = data.image;
+                document.getElementById('full-image-path').textContent = data.path;
+                
+                imageViewerModal.show();
+            } catch (error) {
+                alert(`Error loading image: ${error.message}`);
+            }
+        }
+
         // Open cluster modal
         async function openCluster(clusterId) {
             currentCluster = clusterId;
@@ -638,7 +683,7 @@
                 if (face.distance > 30) distanceClass = 'distance-high';
                 
                 faceDiv.innerHTML = `
-                    <img src="${face.image}" alt="Face">
+                    <img src="${face.image}" alt="Face" onclick="viewFullImage(${face.id})" style="cursor: pointer;" title="Click to view full image">
                     <div class="mt-2 small text-muted">
                         <span class="distance-indicator ${distanceClass}"></span>
                         Distance: ${face.distance.toFixed(2)}

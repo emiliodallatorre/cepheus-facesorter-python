@@ -271,6 +271,19 @@ class DatabaseManager:
             faces.append(face)
         return faces
     
+    def get_face_by_id(self, face_id: int) -> Optional[dict]:
+        """Get a single face by its ID."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM faces WHERE id = ?", (face_id,))
+        row = cursor.fetchone()
+        if row:
+            face = dict(row)
+            face['face_coordinates'] = json.loads(face['face_coordinates'])
+            face['face_encoding'] = np.array(json.loads(face['face_encoding']))
+            return face
+        return None
+    
     def update_face_person(self, face_id: int, person_id: int):
         """Assign a person to a face."""
         conn = self.get_connection()
