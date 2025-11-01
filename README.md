@@ -1,161 +1,180 @@
 # Cepheus Face Sorter
 
-A Python application with CLI interface for detecting, clustering, labeling, and sorting faces from images using TensorFlow models.
+A Python application with CLI and Web Dashboard for detecting, clustering, labeling, and sorting faces from images using TensorFlow models.
 
 ## Features
 
 - 🔍 **Face Detection**: Detect faces in images using MTCNN (TensorFlow-based)
 - 🧠 **Face Recognition**: Generate face embeddings using FaceNet
-- 🔗 **Face Clustering**: Automatically cluster similar faces using DBSCAN
-- 🏷️ **Face Labeling**: Interactive GUI for labeling faces with person information
+- 🔗 **Smart Clustering**: Automatically cluster faces by similarity (hierarchical clustering)
+- � **Web Dashboard**: Interactive dashboard to view, manage, and refine clusters
+- 🏷️ **Interactive Labeling**: Remove incorrect faces before confirming clusters
 - 📁 **Face Sorting**: Organize faces into folders by person
-- 💾 **SQLite Database**: Store all face data, coordinates, embeddings, and person info
+- 💾 **SQLite Database**: Cache embeddings and store all face data
+
+## New Workflow (Recommended)
+
+### 1. Scan Photos
+```bash
+python main.py scan /path/to/photos
+```
+Scans all pictures, detects faces, generates and caches embeddings in SQLite.
+
+### 2. Cluster Faces
+```bash
+python main.py cluster
+```
+Automatically groups similar faces into clusters (one cluster per person ideally).
+- Uses hierarchical clustering with auto-detection
+- Faces that don't match well become outliers
+- Minimum 2 faces per cluster (configurable with `--min-size`)
+
+### 3. Launch Dashboard
+```bash
+python main.py dashboard
+```
+Opens web interface at `http://127.0.0.1:5000`
+
+**Dashboard Features:**
+- View all unlabeled clusters with preview images
+- Click a cluster to see all faces with similarity distances
+- Remove faces that don't belong (color-coded by distance)
+- Assign name, surname, Instagram to cluster
+- System refines cluster definition based on your removals
+- Export all labeled faces to folders when ready
+
+### 4. Iterative Refinement
+Your face removals improve the cluster:
+- Cluster center is recalculated without removed faces
+- Better accuracy for future matching
+- Labeled data is marked as "confirmed"
+
+### 5. Export to Folders
+Click "Export All to Folders" in dashboard or:
+```bash
+python main.py sort
+```
+Creates `output/Name_Surname/` folders with:
+- Extracted face images
+- Original images (optional)
 
 ## Installation
 
-1. Clone the repository:
-```bash
-git clone https://github.com/emiliodallatorre/cepheus-facesorter-python.git
-cd cepheus-facesorter-python
-```
-
-2. Create a virtual environment (recommended):
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-## Usage
-
-### Complete Pipeline
-
-Run the entire workflow in one command:
+## Quick Start
 
 ```bash
-python main.py pipeline /path/to/images
-```
+# 1. Scan your photos
+python main.py scan ./photos
 
-### Step-by-Step Workflow
-
-#### 1. Scan for Faces
-
-Scan a directory for images and detect faces:
-
-```bash
-python main.py scan /path/to/images
-```
-
-This will:
-- Find all supported image formats (.jpg, .jpeg, .png, .bmp, .gif, .tiff)
-- Detect faces using MTCNN
-- Generate face embeddings using FaceNet
-- Store everything in the SQLite database
-
-#### 2. Cluster Faces
-
-Cluster similar faces together:
-
-```bash
+# 2. Cluster faces automatically
 python main.py cluster
+
+# 3. Launch dashboard
+python main.py dashboard
+
+# 4. Open browser to http://127.0.0.1:5000
+# 5. Label clusters interactively
+# 6. Click "Export" when done
 ```
 
-This groups similar faces automatically using DBSCAN clustering.
+## CLI Commands
 
-#### 3. Label Faces
-
-Interactively label faces with person information:
-
+### scan
+Scan directory for images and detect faces:
 ```bash
-python main.py label
+python main.py scan /path/to/images [--force]
 ```
+- Automatically skips already processed images
+- Use `--force` to re-process all images
 
-For each cluster:
-- View all faces in a grid
-- Confirm if they belong to the same person
-- Enter name, surname, and Instagram username (optional)
-
-#### 4. Sort Faces
-
-Sort labeled faces into organized folders:
-
+### cluster  
+Cluster faces using hierarchical clustering:
 ```bash
-python main.py sort
+python main.py cluster [--threshold 0.5] [--min-size 2]
+```
+- `--threshold`: Distance threshold (default 0.5, lower = stricter)
+- `--min-size`: Minimum faces per cluster (default 2)
+
+### dashboard
+Launch web dashboard:
+```bash
+python main.py dashboard [--host 127.0.0.1] [--port 5000]
 ```
 
-This creates folders like `output/John_Doe/` containing:
-- Extracted face images
-- Original images (if enabled in config)
+### clean
+Remove duplicate faces from database:
+```bash
+python main.py clean
+```
 
-### Other Commands
-
-#### View Statistics
-
+### stats
+View database statistics:
 ```bash
 python main.py stats
 ```
 
-Shows database statistics including total faces, persons, clusters, etc.
+### sort
+Export labeled faces to folders:
+```bash
+python main.py sort [--output ./output]
+```
 
 ## Configuration
 
 Edit `config.py` to customize:
-
-- **Detection confidence**: Minimum face detection confidence (default: 0.9)
-- **Similarity threshold**: Face matching threshold (default: 0.6)
-- **Clustering threshold**: Face clustering threshold (default: 0.6)
-- **Output directory**: Where to save sorted faces (default: "output")
-- **Preview settings**: Image size and grid layout for the viewer
-
-## Project Structure
-
-```
-cepheus-facesorter-python/
-├── main.py              # CLI interface
-├── config.py            # Configuration settings
-├── database.py          # SQLite database manager
-├── face_detector.py     # Face detection using MTCNN
-├── face_recognizer.py   # Face recognition using FaceNet
-├── face_clusterer.py    # Face clustering using DBSCAN
-├── face_viewer.py       # Tkinter GUI for face viewing
-├── face_sorter.py       # Face sorting and file management
-├── requirements.txt     # Python dependencies
-└── README.md           # This file
-```
+- `CLUSTERING_DISTANCE_THRESHOLD = 0.5` - Clustering threshold (lower = smaller, stricter clusters)
+- `FACE_DETECTION_CONFIDENCE = 0.9` - Minimum face detection confidence
+- `OUTPUT_DIR = "output"` - Where to save sorted faces
+- `COPY_ORIGINAL_IMAGES = True` - Copy full images to person folders
 
 ## Database Schema
 
 ### Persons Table
 - id, name, surname, instagram
-- created_at, updated_at
+- is_confirmed (marked after labeling)
+- cluster_center (refined center after removals)
 
 ### Faces Table
 - id, person_id, cluster_id
 - original_image_path, face_coordinates
-- face_encoding (512-dim FaceNet embedding)
+- face_encoding (cached 512-dim FaceNet embedding)
+- is_removed (marked when excluded from cluster)
 - confidence, extracted_at
+
+### Images Table
+- id, file_path, person_id
+- has_faces, manually_assigned
+- Tracks all images including those without faces
+
+## Tips
+
+1. **Optimal Clustering**: Adjust `--threshold` if you get too many/few clusters:
+   - Too many small clusters → increase threshold (try 0.6)
+   - Too few large clusters → decrease threshold (try 0.4)
+
+2. **Face Distances**: In dashboard, check distance colors:
+   - Green (< 0.3): Very similar
+   - Blue (0.3-0.4): Similar  
+   - Orange (0.4-0.5): Possibly same
+   - Red (> 0.5): Probably different - consider removing
+
+3. **Outliers**: Single faces or poorly matched faces become outliers (cluster_id = -1)
+   - Can be processed separately or manually assigned
+
+4. **Incremental Scanning**: Re-run scan on same folder - only new images are processed
+
+5. **GPU Acceleration**: Install TensorFlow GPU for faster embedding generation
 
 ## Requirements
 
 - Python 3.8+
 - TensorFlow 2.13+
-- OpenCV
-- MTCNN
-- FaceNet (keras-facenet)
-- scikit-learn
-- Pillow
-- Click
-
-## Tips
-
-1. **Adjust Thresholds**: If clustering is too loose/tight, adjust `CLUSTERING_DISTANCE_THRESHOLD` in `config.py`
-2. **GPU Acceleration**: Install TensorFlow with GPU support for faster processing
-3. **Large Datasets**: Process in batches by running scan on subdirectories
-4. **Outliers**: Faces with cluster_id = -1 are outliers (didn't cluster well)
+- OpenCV, MTCNN, FaceNet, scikit-learn, Flask
+- See `requirements.txt` for full list
 
 ## License
 

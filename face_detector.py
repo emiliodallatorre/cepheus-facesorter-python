@@ -15,7 +15,11 @@ class FaceDetector:
     
     def __init__(self):
         """Initialize the MTCNN face detector."""
-        self.detector = MTCNN(min_face_size=config.MIN_FACE_SIZE)
+        # The MTCNN implementation being used does not accept a min_face_size
+        # constructor argument, so instantiate the detector with defaults and
+        # keep the configured MIN_FACE_SIZE separately for filtering detections.
+        self.detector = MTCNN()
+        self.min_face_size = getattr(config, "MIN_FACE_SIZE", 20)
     
     def detect_faces(self, image_path: str) -> List[dict]:
         """

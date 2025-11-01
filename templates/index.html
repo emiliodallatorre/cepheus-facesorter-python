@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Sorter Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #007bff;
+        }
+
+        .stat-card h3 {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .stat-card .value {
+            font-size: 28px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .section-header h2 {
+            font-size: 20px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .cluster-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .cluster-card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .cluster-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .cluster-preview {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 2px;
+            background: #f0f0f0;
+        }
+
+        .cluster-preview img {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+        }
+
+        .cluster-info {
+            padding: 15px;
+        }
+
+        .cluster-info h3 {
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        .cluster-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-right: 5px;
+        }
+
+        .badge-unlabeled {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .badge-labeled {
+            background: #28a745;
+            color: white;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            max-width: 900px;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 30px;
+        }
+
+        .face-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .face-item {
+            text-align: center;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            transition: border-color 0.2s;
+        }
+
+        .face-item.removed {
+            opacity: 0.5;
+            border-color: #dc3545;
+        }
+
+        .face-item img {
+            width: 150px;
+            height: 150px;
+            object-fit: cover;
+            border-radius: 4px;
+        }
+
+        .face-item .distance {
+            margin-top: 5px;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .face-item .remove-btn {
+            margin-top: 8px;
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Face Sorter Dashboard</h1>
+            <p>Manage and organize your face clusters</p>
+            
+            <div class="stats" id="stats">
+                <div class="stat-card">
+                    <h3>Total Faces</h3>
+                    <div class="value" id="stat-total-faces">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Clusters</h3>
+                    <div class="value" id="stat-clusters">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Labeled</h3>
+                    <div class="value" id="stat-labeled">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Persons</h3>
+                    <div class="value" id="stat-persons">-</div>
+                </div>
+            </div>
+        </header>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Processing</h2>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
+                <div style="flex: 1; min-width: 250px;">
+                    <label for="photoDirectory" style="display: block; margin-bottom: 5px; font-size: 14px; color: #666;">Photo Directory</label>
+                    <input type="text" id="photoDirectory" value="./photos" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                </div>
+                <div style="display: flex; gap: 10px; align-items: flex-end;">
+                    <button class="btn btn-primary" onclick="scanFaces()">Scan for Faces</button>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+                <div style="min-width: 150px;">
+                    <label for="clusterThreshold" style="display: block; margin-bottom: 5px; font-size: 14px; color: #666;">
+                        Distance Threshold
+                        <span style="color: #999; font-size: 12px;">(lower = stricter)</span>
+                    </label>
+                    <input type="number" id="clusterThreshold" value="0.5" min="0.1" max="1.0" step="0.05" 
+                           style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                </div>
+                <div style="min-width: 120px;">
+                    <label for="minClusterSize" style="display: block; margin-bottom: 5px; font-size: 14px; color: #666;">Min Cluster Size</label>
+                    <input type="number" id="minClusterSize" value="2" min="1" max="10" step="1" 
+                           style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                </div>
+                <button class="btn btn-primary" onclick="clusterFaces(false)">Cluster Faces</button>
+                <button class="btn btn-danger" onclick="clusterFaces(true)">Force Re-cluster</button>
+            </div>
+            <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px; font-size: 13px;">
+                <strong>💡 Tip:</strong> If getting only 1 cluster, try lower threshold (0.3 or 0.2). If getting too many clusters, try higher threshold (0.6 or 0.7).
+                <br><strong>🔄 Force Re-cluster:</strong> Clears existing cluster assignments and re-clusters all faces with new parameters.
+            </div>
+            <div id="processingStatus" style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px; display: none;">
+                <div id="processingMessage"></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Unlabeled Clusters</h2>
+                <button class="btn btn-success" onclick="exportFaces()">Export All to Folders</button>
+            </div>
+            <div class="cluster-grid" id="clusters">
+                <div class="loading">Loading clusters...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for cluster details -->
+    <div class="modal" id="clusterModal">
+        <div class="modal-content">
+            <h2>Cluster <span id="modal-cluster-id"></span></h2>
+            <p>Select faces to remove from this cluster, then assign a name</p>
+            
+            <div class="face-grid" id="modal-faces"></div>
+            
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="input-name" placeholder="First name">
+            </div>
+            <div class="form-group">
+                <label>Surname</label>
+                <input type="text" id="input-surname" placeholder="Last name">
+            </div>
+            <div class="form-group">
+                <label>Instagram (optional)</label>
+                <input type="text" id="input-instagram" placeholder="@username">
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button class="btn btn-primary" onclick="labelCluster()">Confirm and Label</button>
+                <button class="btn" onclick="closeModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentCluster = null;
+        let removedFaces = new Set();
+
+        // Load statistics
+        async function loadStats() {
+            const response = await fetch('/api/stats');
+            const stats = await response.json();
+            
+            document.getElementById('stat-total-faces').textContent = stats.total_faces;
+            document.getElementById('stat-clusters').textContent = stats.clusters;
+            document.getElementById('stat-labeled').textContent = stats.labeled_faces;
+            document.getElementById('stat-persons').textContent = stats.total_persons;
+        }
+
+        // Load clusters
+        async function loadClusters() {
+            const response = await fetch('/api/clusters');
+            const clusters = await response.json();
+            
+            const container = document.getElementById('clusters');
+            
+            if (clusters.length === 0) {
+                container.innerHTML = '<div class="loading">No unlabeled clusters found</div>';
+                return;
+            }
+            
+            container.innerHTML = '';
+            
+            clusters.forEach(cluster => {
+                if (cluster.is_labeled) return; // Skip labeled clusters for now
+                
+                const card = document.createElement('div');
+                card.className = 'cluster-card';
+                card.onclick = () => openCluster(cluster.cluster_id);
+                
+                let previewHTML = '';
+                cluster.preview_faces.forEach(img => {
+                    previewHTML += `<img src="${img}" alt="Face">`;
+                });
+                
+                card.innerHTML = `
+                    <div class="cluster-preview">${previewHTML}</div>
+                    <div class="cluster-info">
+                        <h3>Cluster ${cluster.cluster_id}</h3>
+                        <span class="cluster-badge badge-unlabeled">Unlabeled</span>
+                        <p>${cluster.face_count} faces</p>
+                    </div>
+                `;
+                
+                container.appendChild(card);
+            });
+        }
+
+        // Open cluster modal
+        async function openCluster(clusterId) {
+            currentCluster = clusterId;
+            removedFaces.clear();
+            
+            const response = await fetch(`/api/cluster/${clusterId}`);
+            const data = await response.json();
+            
+            document.getElementById('modal-cluster-id').textContent = clusterId;
+            
+            const facesContainer = document.getElementById('modal-faces');
+            facesContainer.innerHTML = '';
+            
+            data.faces.forEach(face => {
+                const faceDiv = document.createElement('div');
+                faceDiv.className = 'face-item';
+                faceDiv.dataset.faceId = face.id;
+                
+                let distanceColor = 'green';
+                if (face.distance > 0.4) distanceColor = 'orange';
+                if (face.distance > 0.5) distanceColor = 'red';
+                
+                faceDiv.innerHTML = `
+                    <img src="${face.image}" alt="Face">
+                    <div class="distance" style="color: ${distanceColor}">
+                        Distance: ${face.distance.toFixed(3)}
+                    </div>
+                    <button class="btn btn-danger remove-btn" onclick="toggleRemoveFace(event, ${face.id})">
+                        Remove
+                    </button>
+                `;
+                
+                facesContainer.appendChild(faceDiv);
+            });
+            
+            document.getElementById('clusterModal').classList.add('active');
+        }
+
+        // Toggle remove face
+        function toggleRemoveFace(event, faceId) {
+            event.stopPropagation();
+            const faceDiv = document.querySelector(`[data-face-id="${faceId}"]`);
+            
+            if (removedFaces.has(faceId)) {
+                removedFaces.delete(faceId);
+                faceDiv.classList.remove('removed');
+                event.target.textContent = 'Remove';
+            } else {
+                removedFaces.add(faceId);
+                faceDiv.classList.add('removed');
+                event.target.textContent = 'Undo';
+            }
+        }
+
+        // Label cluster
+        async function labelCluster() {
+            const name = document.getElementById('input-name').value.trim();
+            const surname = document.getElementById('input-surname').value.trim();
+            const instagram = document.getElementById('input-instagram').value.trim();
+            
+            if (!name || !surname) {
+                alert('Please enter name and surname');
+                return;
+            }
+            
+            // Remove faces first
+            for (const faceId of removedFaces) {
+                await fetch(`/api/cluster/${currentCluster}/remove_face`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ face_id: faceId })
+                });
+            }
+            
+            // Label cluster
+            const response = await fetch(`/api/cluster/${currentCluster}/label`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, surname, instagram })
+            });
+            
+            if (response.ok) {
+                closeModal();
+                loadStats();
+                loadClusters();
+            }
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('clusterModal').classList.remove('active');
+            document.getElementById('input-name').value = '';
+            document.getElementById('input-surname').value = '';
+            document.getElementById('input-instagram').value = '';
+        }
+
+        // Scan for faces
+        async function scanFaces() {
+            const directory = document.getElementById('photoDirectory').value;
+            const statusDiv = document.getElementById('processingStatus');
+            const messageDiv = document.getElementById('processingMessage');
+            
+            statusDiv.style.display = 'block';
+            messageDiv.innerHTML = '<strong>Scanning...</strong> Looking for faces in images...';
+            
+            try {
+                const response = await fetch('/api/scan', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ directory })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    const stats = result.stats;
+                    messageDiv.innerHTML = `
+                        <strong>Scan Complete!</strong><br>
+                        Total images: ${stats.total_images}<br>
+                        Processed: ${stats.processed}<br>
+                        Faces found: ${stats.faces_found}<br>
+                        Skipped (already processed): ${stats.skipped}<br>
+                        Errors: ${stats.errors}
+                    `;
+                    loadStats();
+                } else {
+                    messageDiv.innerHTML = `<strong>Error:</strong> ${result.error}`;
+                }
+            } catch (error) {
+                messageDiv.innerHTML = `<strong>Error:</strong> ${error.message}`;
+            }
+        }
+
+        // Cluster faces
+        async function clusterFaces(force = false) {
+            const statusDiv = document.getElementById('processingStatus');
+            const messageDiv = document.getElementById('processingMessage');
+            const threshold = parseFloat(document.getElementById('clusterThreshold').value);
+            const minSize = parseInt(document.getElementById('minClusterSize').value);
+            
+            if (force && !confirm('Force re-clustering will clear all existing cluster assignments. Continue?')) {
+                return;
+            }
+            
+            statusDiv.style.display = 'block';
+            const action = force ? 'Force re-clustering' : 'Clustering';
+            messageDiv.innerHTML = `<strong>${action}...</strong> Grouping similar faces together (threshold=${threshold}, min_size=${minSize})...`;
+            
+            try {
+                const response = await fetch('/api/cluster', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ threshold, min_size: minSize, force })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    const stats = result.stats;
+                    messageDiv.innerHTML = `
+                        <strong>Clustering Complete!</strong><br>
+                        Total faces: ${stats.total_faces}<br>
+                        Clusters created: ${stats.clusters_formed}<br>
+                        Outliers: ${stats.outliers}<br>
+                        Avg cluster size: ${stats.avg_cluster_size.toFixed(1)} faces
+                    `;
+                    loadStats();
+                    loadClusters();
+                } else {
+                    messageDiv.innerHTML = `<strong>Error:</strong> ${result.error}`;
+                }
+            } catch (error) {
+                messageDiv.innerHTML = `<strong>Error:</strong> ${error.message}`;
+            }
+        }
+
+        // Export faces
+        async function exportFaces() {
+            if (!confirm('Export all labeled faces to folders?')) return;
+            
+            const response = await fetch('/api/export', { method: 'POST' });
+            const result = await response.json();
+            
+            if (result.success) {
+                alert(`Exported successfully!\nFaces sorted: ${result.results.total_faces_sorted}\nPersons: ${result.results.persons_processed}`);
+            }
+        }
+
+        // Initialize
+        loadStats();
+        loadClusters();
+        
+        // Refresh every 30 seconds
+        setInterval(() => {
+            loadStats();
+            loadClusters();
+        }, 30000);
+    </script>
+</body>
+</html>

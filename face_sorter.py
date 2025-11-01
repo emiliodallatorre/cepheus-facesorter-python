@@ -6,6 +6,7 @@ from typing import List, Dict
 import cv2
 import numpy as np
 from pathlib import Path
+import click
 
 import config
 from database import DatabaseManager
@@ -127,6 +128,47 @@ class FaceSorter:
             'faces_sorted': faces_sorted,
             'originals_copied': originals_copied,
             'folder': person_folder
+        }
+    
+    def sort_all_labeled_faces_with_progress(self) -> Dict[str, any]:
+        """
+        Sort all labeled faces into their respective person folders with progress output.
+        
+        Returns:
+            Dictionary with overall statistics
+        """
+        persons = self.db.get_all_persons()
+        
+        total_faces = 0
+        total_originals = 0
+        persons_processed = 0
+        
+        results = {}
+        
+        with click.progressbar(persons, label='Sorting persons', 
+                              show_percent=True, show_eta=True) as progress_persons:
+            for person in progress_persons:
+                person_id = person['id']
+                person_name = f"{person['name']} {person['surname']}"
+                
+                try:
+                    click.echo(f"\n  Processing: {person_name}")
+                    stats = self.sort_person_faces(person_id)
+                    total_faces += stats['faces_sorted']
+                    total_originals += stats['originals_copied']
+                    persons_processed += 1
+                    
+                    results[person_name] = stats
+                    click.echo(f"    [OK] {stats['faces_sorted']} faces sorted")
+                except Exception as e:
+                    results[person_name] = {'error': str(e)}
+                    click.echo(f"    [ERROR] {str(e)}")
+        
+        return {
+            'total_faces_sorted': total_faces,
+            'total_originals_copied': total_originals,
+            'persons_processed': persons_processed,
+            'details': results
         }
     
     def sort_all_labeled_faces(self) -> Dict[str, any]:

@@ -1,8 +1,7 @@
-"""Main CLI interface for the face sorter application."""
+"""Simplified CLI interface for the face sorter application - Dashboard-focused."""
 
 import click
 import os
-import sys
 from pathlib import Path
 import numpy as np
 
@@ -11,26 +10,25 @@ from database import DatabaseManager
 from face_detector import FaceDetector, scan_directory_for_images
 from face_recognizer import FaceRecognizer
 from face_clusterer import FaceClusterer
-from face_viewer import FaceViewer
-from face_sorter import FaceSorter
 
 
 @click.group()
 def cli():
-    """Face Sorter - Detect, cluster, label, and sort faces from images."""
+    """Face Sorter - Detect, cluster, and manage faces via web dashboard."""
     pass
 
 
 @cli.command()
-@click.argument('input_dir', type=click.Path(exists=True))
 @click.option('--db', default=config.DATABASE_PATH, help='Database file path')
-def scan(input_dir, db):
+@click.option('--force', is_flag=True, help='Force re-scan even if images are already processed')
+@click.argument('input_dir', type=click.Path(exists=True))
+def scan(input_dir, db, force):
     """
     Scan a directory for images and detect faces.
     
     INPUT_DIR: Directory containing images to scan
     """
-    click.echo(f"🔍 Scanning directory: {input_dir}")
+    click.echo(f"Scanning directory: {input_dir}")
     
     # Initialize components
     detector = FaceDetector()
@@ -39,27 +37,64 @@ def scan(input_dir, db):
     
     # Find images
     image_paths = scan_directory_for_images(input_dir)
-    click.echo(f"📸 Found {len(image_paths)} images")
+    click.echo(f"Found {len(image_paths)} images")
     
     if not image_paths:
-        click.echo("❌ No images found!")
+        click.echo("ERROR: No images found!")
+        return
+    
+    # Check which images are already in database
+    images_to_process = []
+    if not force:
+        for img_path in image_paths:
+            existing = db_manager.get_faces_by_image(img_path)
+            if not existing:
+                images_to_process.append(img_path)
+        click.echo(f"{len(image_paths) - len(images_to_process)} images already processed")
+        if images_to_process:
+            click.echo(f"{len(images_to_process)} new images to process")
+    else:
+        images_to_process = image_paths
+        click.echo("Force mode: processing all images")
+    
+    if not images_to_process:
+        click.echo("No new images to process!")
+        db_manager.close()
         return
     
     # Process images
     total_faces = 0
+    images_with_faces = 0
+    images_without_faces = 0
+    duplicate_faces = 0
     
-    with click.progressbar(image_paths, label='Processing images') as images:
+    with click.progressbar(images_to_process, label='Processing images', 
+                          show_eta=True, show_percent=True) as images:
         for image_path in images:
             try:
                 # Detect faces
                 faces = detector.detect_faces(image_path)
                 
+                if faces:
+                    images_with_faces += 1
+                    click.echo(f"\n  [OK] {Path(image_path).name}: {len(faces)} face(s) detected")
+                else:
+                    images_without_faces += 1
+                
                 for face in faces:
+                    # Check if this face already exists
+                    if db_manager.face_exists(image_path, face['box']):
+                        click.echo(f"       Skipping duplicate face at {face['box']}")
+                        duplicate_faces += 1
+                        continue
+                    
                     # Prepare face for encoding
                     face_normalized = detector.extract_face_for_encoding(face['image'])
                     
                     # Generate embedding
+                    click.echo(f"       Generating embedding... ", nl=False)
                     embedding = recognizer.get_embedding(face_normalized)
+                    click.echo("done")
                     
                     # Save to database
                     db_manager.add_face(
@@ -72,23 +107,32 @@ def scan(input_dir, db):
                     total_faces += 1
                     
             except Exception as e:
-                click.echo(f"\n⚠️  Error processing {image_path}: {e}", err=True)
+                click.echo(f"\nWARNING: Error processing {Path(image_path).name}: {e}", err=True)
     
     db_manager.close()
     
-    click.echo(f"\n✅ Scan complete! Detected {total_faces} faces")
-    click.echo(f"💾 Data saved to: {db}")
+    # Summary
+    click.echo(f"\n{'='*50}")
+    click.echo(f"Scan complete!")
+    click.echo(f"  Images processed: {len(images_to_process)}")
+    click.echo(f"  Images with faces: {images_with_faces}")
+    click.echo(f"  Images without faces: {images_without_faces}")
+    click.echo(f"  Total faces detected: {total_faces}")
+    if duplicate_faces > 0:
+        click.echo(f"  Duplicate faces skipped: {duplicate_faces}")
+    click.echo(f"{'='*50}")
 
 
 @cli.command()
 @click.option('--db', default=config.DATABASE_PATH, help='Database file path')
 @click.option('--threshold', default=config.CLUSTERING_DISTANCE_THRESHOLD, 
               help='Clustering distance threshold')
-def cluster(db, threshold):
+@click.option('--min-size', default=2, help='Minimum cluster size (faces with fewer are outliers)')
+def cluster(db, threshold, min_size):
     """
-    Cluster detected faces by similarity.
+    Cluster detected faces by similarity using hierarchical clustering.
     """
-    click.echo("🔗 Clustering faces by similarity...")
+    click.echo("Clustering faces by similarity...")
     
     # Initialize components
     db_manager = DatabaseManager(db)
@@ -98,159 +142,92 @@ def cluster(db, threshold):
     faces = db_manager.get_all_faces()
     
     if not faces:
-        click.echo("❌ No faces found in database. Run 'scan' first.")
+        click.echo("ERROR: No faces found in database. Run 'scan' first.")
         db_manager.close()
         return
     
-    click.echo(f"📊 Found {len(faces)} faces")
+    click.echo(f"Found {len(faces)} faces")
     
     # Extract embeddings
+    click.echo("Extracting face embeddings...")
     embeddings = np.array([face['face_encoding'] for face in faces])
+    click.echo(f"  Extracted {len(embeddings)} embeddings")
     
-    # Cluster
-    cluster_labels = clusterer.cluster_faces(embeddings)
+    # Cluster with automatic detection
+    click.echo(f"Running hierarchical clustering (threshold={threshold}, min_size={min_size})...")
+    cluster_labels = clusterer.auto_cluster_faces(embeddings, min_cluster_size=min_size)
+    click.echo(f"  Clustering complete")
     
     # Update database
-    for face, cluster_id in zip(faces, cluster_labels):
-        if cluster_id != -1:  # Skip outliers
+    click.echo("Updating database with cluster assignments...")
+    updated_count = 0
+    outlier_count = 0
+    with click.progressbar(list(zip(faces, cluster_labels)), 
+                          label='Updating faces',
+                          show_percent=True) as items:
+        for face, cluster_id in items:
             db_manager.update_face_cluster(face['id'], int(cluster_id))
+            if cluster_id != -1:
+                updated_count += 1
+            else:
+                outlier_count += 1
+    click.echo(f"  Updated {updated_count} clustered faces, {outlier_count} outliers")
     
     # Get statistics
     stats = clusterer.get_cluster_statistics(cluster_labels)
     
     db_manager.close()
     
-    click.echo(f"\n✅ Clustering complete!")
-    click.echo(f"   📦 Clusters: {stats['n_clusters']}")
-    click.echo(f"   🔍 Outliers: {stats['n_outliers']}")
-    click.echo(f"   📈 Avg cluster size: {stats['avg_cluster_size']:.1f}")
+    click.echo(f"\n{'='*50}")
+    click.echo(f"Clustering complete!")
+    click.echo(f"  Clusters found: {stats['n_clusters']}")
+    click.echo(f"  Outliers (ungrouped): {stats['n_outliers']}")
+    click.echo(f"  Average cluster size: {stats['avg_cluster_size']:.1f} faces")
+    click.echo(f"  Largest cluster: {max(stats['cluster_sizes'].values()) if stats['cluster_sizes'] else 0} faces")
+    click.echo(f"  Smallest cluster: {min(stats['cluster_sizes'].values()) if stats['cluster_sizes'] else 0} faces")
+    click.echo(f"{'='*50}")
 
 
 @cli.command()
 @click.option('--db', default=config.DATABASE_PATH, help='Database file path')
-def label(db):
+def clean(db):
     """
-    Label faces by cluster - assign names to detected faces.
+    Remove duplicate faces from the database.
     """
-    click.echo("🏷️  Starting face labeling process...")
+    click.echo("Checking for duplicate faces...")
     
-    # Initialize components
     db_manager = DatabaseManager(db)
-    viewer = FaceViewer("Face Labeling")
+    all_faces = db_manager.get_all_faces()
     
-    # Get unique clusters
-    cluster_ids = db_manager.get_unique_clusters()
+    # Track seen faces by image path + coordinates
+    seen = set()
+    duplicates = []
     
-    if not cluster_ids:
-        click.echo("❌ No clusters found. Run 'cluster' first.")
+    for face in all_faces:
+        key = (face['original_image_path'], tuple(face['face_coordinates']))
+        if key in seen:
+            duplicates.append(face['id'])
+        else:
+            seen.add(key)
+    
+    if not duplicates:
+        click.echo("No duplicates found!")
         db_manager.close()
         return
     
-    click.echo(f"📦 Found {len(cluster_ids)} clusters to label")
+    click.echo(f"Found {len(duplicates)} duplicate faces")
     
-    try:
-        with viewer:
-            for cluster_id in cluster_ids:
-                # Get faces in this cluster
-                faces = db_manager.get_faces_by_cluster(cluster_id)
-                
-                if not faces:
-                    continue
-                
-                click.echo(f"\n👤 Cluster {cluster_id} ({len(faces)} faces)")
-                
-                # Load face images
-                face_images = []
-                for face in faces:
-                    import cv2
-                    image = cv2.imread(face['original_image_path'])
-                    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                    x, y, w, h = face['face_coordinates']
-                    face_img = image_rgb[y:y+h, x:x+w]
-                    face_images.append(face_img)
-                
-                # Show faces and confirm they belong together
-                result = viewer.show_face_grid(
-                    face_images,
-                    message=f"Cluster {cluster_id}: Are these all the same person?",
-                    allow_individual_selection=False
-                )
-                
-                if not result:
-                    click.echo("   ⏭️  Skipped")
-                    continue
-                
-                # Ask for person info
-                person_info = viewer.ask_person_info()
-                
-                if not person_info:
-                    click.echo("   ⏭️  Cancelled")
-                    continue
-                
-                # Check if person already exists
-                existing_person = db_manager.get_person_by_name(
-                    person_info['name'], 
-                    person_info['surname']
-                )
-                
-                if existing_person:
-                    person_id = existing_person['id']
-                    click.echo(f"   ✓ Using existing person: {person_info['name']} {person_info['surname']}")
-                else:
-                    person_id = db_manager.add_person(
-                        name=person_info['name'],
-                        surname=person_info['surname'],
-                        instagram=person_info['instagram']
-                    )
-                    click.echo(f"   ✓ Created new person: {person_info['name']} {person_info['surname']}")
-                
-                # Assign all faces in cluster to this person
-                for face in faces:
-                    db_manager.update_face_person(face['id'], person_id)
-                
-                click.echo(f"   ✅ Labeled {len(faces)} faces")
-    
-    except KeyboardInterrupt:
-        click.echo("\n\n⏸️  Labeling interrupted")
-    finally:
-        db_manager.close()
-    
-    click.echo("\n✅ Labeling session complete!")
-
-
-@cli.command()
-@click.option('--db', default=config.DATABASE_PATH, help='Database file path')
-@click.option('--output', default=config.OUTPUT_DIR, help='Output directory')
-def sort(db, output):
-    """
-    Sort labeled faces into person folders.
-    """
-    click.echo("📁 Sorting faces into folders...")
-    
-    # Initialize components
-    db_manager = DatabaseManager(db)
-    sorter = FaceSorter(db_manager, output_dir=output)
-    
-    # Sort all faces
-    results = sorter.sort_all_labeled_faces()
+    if click.confirm("Remove duplicates?"):
+        conn = db_manager.get_connection()
+        cursor = conn.cursor()
+        for face_id in duplicates:
+            cursor.execute("DELETE FROM faces WHERE id = ?", (face_id,))
+        conn.commit()
+        click.echo(f"[OK] Removed {len(duplicates)} duplicate faces")
+    else:
+        click.echo("Cancelled")
     
     db_manager.close()
-    
-    # Display results
-    click.echo(f"\n✅ Sorting complete!")
-    click.echo(f"   📸 Total faces: {results['total_faces_sorted']}")
-    click.echo(f"   🖼️  Original images: {results['total_originals_copied']}")
-    click.echo(f"   👥 Persons: {results['persons_processed']}")
-    click.echo(f"\n📂 Output directory: {output}")
-    
-    # Show details
-    if results['details']:
-        click.echo("\n📋 Details:")
-        for person_name, stats in results['details'].items():
-            if 'error' in stats:
-                click.echo(f"   ❌ {person_name}: {stats['error']}")
-            else:
-                click.echo(f"   ✓ {person_name}: {stats['faces_sorted']} faces")
 
 
 @cli.command()
@@ -267,56 +244,52 @@ def stats(db):
     unlabeled_faces = db_manager.get_unlabeled_faces()
     clusters = db_manager.get_unique_clusters()
     
-    click.echo("\n📊 Database Statistics")
+    click.echo("\nDatabase Statistics")
     click.echo("=" * 40)
-    click.echo(f"👥 Total persons: {len(persons)}")
-    click.echo(f"📸 Total faces: {len(all_faces)}")
-    click.echo(f"🏷️  Labeled faces: {len(all_faces) - len(unlabeled_faces)}")
-    click.echo(f"❓ Unlabeled faces: {len(unlabeled_faces)}")
-    click.echo(f"📦 Clusters: {len(clusters)}")
+    click.echo(f"Total persons: {len(persons)}")
+    click.echo(f"Total faces: {len(all_faces)}")
+    click.echo(f"Labeled faces: {len(all_faces) - len(unlabeled_faces)}")
+    click.echo(f"Unlabeled faces: {len(unlabeled_faces)}")
+    click.echo(f"Clusters: {len(clusters)}")
     
     if persons:
-        click.echo("\n👤 Persons:")
+        click.echo("\nPersons:")
         for person in persons:
             instagram = f" (@{person['instagram']})" if person['instagram'] else ""
             face_count = len(db_manager.get_faces_by_person(person['id']))
-            click.echo(f"   • {person['name']} {person['surname']}{instagram}: {face_count} faces")
+            click.echo(f"  - {person['name']} {person['surname']}{instagram}: {face_count} faces")
     
     db_manager.close()
 
 
 @cli.command()
-@click.argument('input_dir', type=click.Path(exists=True))
-@click.option('--db', default=config.DATABASE_PATH, help='Database file path')
-@click.option('--output', default=config.OUTPUT_DIR, help='Output directory')
-def pipeline(input_dir, db, output):
+@click.option('--host', default='127.0.0.1', help='Host to run dashboard on')
+@click.option('--port', default=5000, help='Port to run dashboard on')
+@click.option('--debug/--no-debug', default=True, help='Run in debug mode')
+def dashboard(host, port, debug):
     """
-    Run the complete pipeline: scan -> cluster -> label -> sort.
+    Launch the web dashboard for managing clusters.
     
-    INPUT_DIR: Directory containing images to process
+    Open http://127.0.0.1:5000 in your browser to:
+    - Scan for faces
+    - Cluster similar faces
+    - Review and refine clusters
+    - Label persons
+    - Export to folders
     """
-    click.echo("🚀 Starting complete face sorting pipeline...\n")
+    from dashboard import run_dashboard
     
-    # Step 1: Scan
-    ctx = click.get_current_context()
-    ctx.invoke(scan, input_dir=input_dir, db=db)
+    click.echo(f"Starting dashboard on http://{host}:{port}")
+    click.echo("Press Ctrl+C to stop\n")
+    click.echo("Dashboard Features:")
+    click.echo("  - Scan photos for faces")
+    click.echo("  - Cluster similar faces automatically")
+    click.echo("  - Review clusters and remove incorrect matches")
+    click.echo("  - Label clusters with person information")
+    click.echo("  - Export organized photos to folders")
+    click.echo()
     
-    click.echo("\n" + "=" * 50 + "\n")
-    
-    # Step 2: Cluster
-    ctx.invoke(cluster, db=db)
-    
-    click.echo("\n" + "=" * 50 + "\n")
-    
-    # Step 3: Label
-    ctx.invoke(label, db=db)
-    
-    click.echo("\n" + "=" * 50 + "\n")
-    
-    # Step 4: Sort
-    ctx.invoke(sort, db=db, output=output)
-    
-    click.echo("\n🎉 Pipeline complete!")
+    run_dashboard(host=host, port=port, debug=debug)
 
 
 if __name__ == '__main__':

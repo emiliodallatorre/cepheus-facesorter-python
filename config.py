@@ -10,8 +10,8 @@ FACE_DETECTION_CONFIDENCE = 0.9  # MTCNN confidence threshold
 MIN_FACE_SIZE = 40  # Minimum face size in pixels
 
 # Face recognition configuration
-SIMILARITY_THRESHOLD = 0.6  # Lower = more similar (Euclidean distance)
-CLUSTERING_DISTANCE_THRESHOLD = 0.6  # For DBSCAN clustering
+SIMILARITY_THRESHOLD = 0.4  # Lower = more similar (Euclidean distance)
+CLUSTERING_DISTANCE_THRESHOLD = 0.5  # For DBSCAN clustering (lower = stricter, smaller clusters)
 
 # Output configuration
 OUTPUT_DIR = "output"
