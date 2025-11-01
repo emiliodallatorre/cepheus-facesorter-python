@@ -36,6 +36,43 @@
             margin-bottom: 10px;
         }
 
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            background: transparent;
+            border: none;
+            font-size: 16px;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: #007bff;
+            background: #f8f9fa;
+        }
+
+        .tab.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+            font-weight: 600;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
         .stats {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -115,6 +152,15 @@
 
         .btn-danger:hover {
             background: #c82333;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #545b62;
         }
 
         .cluster-grid {
@@ -265,6 +311,106 @@
             padding: 40px;
             color: #666;
         }
+
+        /* People view styles */
+        .people-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .people-controls label {
+            font-size: 14px;
+            color: #666;
+            margin-right: 5px;
+        }
+
+        .people-controls select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .people-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .person-card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .person-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .person-header {
+            padding: 15px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .person-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .person-instagram {
+            font-size: 14px;
+            color: #007bff;
+            margin-bottom: 5px;
+        }
+
+        .person-stats {
+            font-size: 13px;
+            color: #666;
+        }
+
+        .person-photos {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2px;
+            background: #f0f0f0;
+            max-height: 250px;
+            overflow: hidden;
+        }
+
+        .person-photos img {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .person-photos img:hover {
+            opacity: 0.8;
+        }
+
+        .person-actions {
+            padding: 12px;
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .person-actions button {
+            padding: 6px 12px;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -272,6 +418,12 @@
         <header>
             <h1>Face Sorter Dashboard</h1>
             <p>Manage and organize your face clusters</p>
+            
+            <!-- Tab Navigation -->
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('clusters')">Clusters</button>
+                <button class="tab" onclick="switchTab('people')">People</button>
+            </div>
             
             <div class="stats" id="stats">
                 <div class="stat-card">
@@ -293,10 +445,12 @@
             </div>
         </header>
 
-        <div class="section">
-            <div class="section-header">
-                <h2>Processing</h2>
-            </div>
+        <!-- Clusters Tab Content -->
+        <div id="clusters-tab" class="tab-content active">
+            <div class="section">
+                <div class="section-header">
+                    <h2>Processing</h2>
+                </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
                 <div style="flex: 1; min-width: 250px;">
                     <label for="photoDirectory" style="display: block; margin-bottom: 5px; font-size: 14px; color: #666;">Photo Directory</label>
@@ -312,7 +466,7 @@
                         Distance Threshold
                         <span style="color: #999; font-size: 12px;">(lower = stricter)</span>
                     </label>
-                    <input type="number" id="clusterThreshold" value="0.5" min="0.1" max="1.0" step="0.05" 
+                    <input type="number" id="clusterThreshold" value="26" min="0.1" max="50" step="0.5" 
                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                 </div>
                 <div style="min-width: 120px;">
@@ -320,12 +474,11 @@
                     <input type="number" id="minClusterSize" value="2" min="1" max="10" step="1" 
                            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
                 </div>
-                <button class="btn btn-primary" onclick="clusterFaces(false)">Cluster Faces</button>
-                <button class="btn btn-danger" onclick="clusterFaces(true)">Force Re-cluster</button>
+                <button class="btn btn-primary" onclick="clusterFaces(true)">Cluster Faces</button>
             </div>
             <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px; font-size: 13px;">
-                <strong>💡 Tip:</strong> If getting only 1 cluster, try lower threshold (0.3 or 0.2). If getting too many clusters, try higher threshold (0.6 or 0.7).
-                <br><strong>🔄 Force Re-cluster:</strong> Clears existing cluster assignments and re-clusters all faces with new parameters.
+                <strong>💡 Tip:</strong> If getting only 1 cluster, try lower threshold (20 or 15). If getting too many clusters, try higher threshold (30 or 35).
+                <br><strong>Note:</strong> Clustering always clears existing assignments and re-clusters all faces with current parameters.
             </div>
             <div id="processingStatus" style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px; display: none;">
                 <div id="processingMessage"></div>
@@ -335,12 +488,45 @@
         <div class="section">
             <div class="section-header">
                 <h2>Unlabeled Clusters</h2>
-                <button class="btn btn-success" onclick="exportFaces()">Export All to Folders</button>
+                <button class="btn btn-secondary" onclick="showUnlabeledFaces()">View Unlabeled Faces</button>
+                <button class="btn btn-success" onclick="showExportDialog()">Export All to Folders</button>
             </div>
             <div class="cluster-grid" id="clusters">
                 <div class="loading">Loading clusters...</div>
             </div>
         </div>
+        </div>
+        <!-- End Clusters Tab Content -->
+
+        <!-- People Tab Content -->
+        <div id="people-tab" class="tab-content">
+            <div class="section">
+                <div class="section-header">
+                    <h2>All People</h2>
+                </div>
+                
+                <div class="people-controls">
+                    <label for="sortBy">Sort by:</label>
+                    <select id="sortBy" onchange="loadPeople()">
+                        <option value="name">Name</option>
+                        <option value="surname">Surname</option>
+                        <option value="instagram">Instagram</option>
+                        <option value="face_count">Face Count</option>
+                    </select>
+                    
+                    <label for="sortOrder">Order:</label>
+                    <select id="sortOrder" onchange="loadPeople()">
+                        <option value="asc">Ascending</option>
+                        <option value="desc">Descending</option>
+                    </select>
+                </div>
+                
+                <div class="people-list" id="people-list">
+                    <div class="loading">Loading people...</div>
+                </div>
+            </div>
+        </div>
+        <!-- End People Tab Content -->
     </div>
 
     <!-- Modal for cluster details -->
@@ -371,9 +557,70 @@
         </div>
     </div>
 
+    <!-- Modal for unlabeled faces -->
+    <div class="modal" id="unlabeledFacesModal">
+        <div class="modal-content" style="max-width: 900px;">
+            <h2>Unlabeled Faces</h2>
+            <p>Manually assign faces to existing persons</p>
+            
+            <div class="form-group">
+                <label>Search Person</label>
+                <input type="text" id="search-person" placeholder="Type name to search..." oninput="searchPersons()">
+                <div id="person-search-results" style="margin-top: 10px; max-height: 150px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; display: none;"></div>
+            </div>
+            
+            <div id="unlabeled-faces-grid" class="face-grid" style="max-height: 400px; overflow-y: auto; margin-top: 20px;">
+                <div class="loading">Loading unlabeled faces...</div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button class="btn" onclick="closeUnlabeledFacesModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for export -->
+    <div class="modal" id="exportModal">
+        <div class="modal-content">
+            <h2>Export Faces to Folders</h2>
+            <p>All labeled faces will be sorted into folders by person name</p>
+            
+            <div class="form-group">
+                <label>Output Directory</label>
+                <input type="text" id="output-directory" placeholder="./output" value="./output">
+                <p style="font-size: 12px; color: #666; margin-top: 5px;">
+                    Faces will be saved here, along with a database backup
+                </p>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button class="btn btn-success" onclick="exportFaces()">Export Now</button>
+                <button class="btn" onclick="closeExportModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for person details -->
+    <div class="modal" id="personModal">
+        <div class="modal-content" style="max-width: 900px;">
+            <h2 id="person-modal-name"></h2>
+            <p id="person-modal-info" style="color: #666; margin-bottom: 20px;"></p>
+            
+            <div class="face-grid" id="person-modal-faces" style="max-height: 500px; overflow-y: auto;">
+                <div class="loading">Loading photos...</div>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button class="btn" onclick="closePersonModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let currentCluster = null;
         let removedFaces = new Set();
+        let selectedPerson = null;
+        let selectedFaceForAssignment = null;
 
         // Load statistics
         async function loadStats() {
@@ -602,15 +849,350 @@
         }
 
         // Export faces
+        async function showExportDialog() {
+            document.getElementById('exportModal').classList.add('active');
+        }
+
+        function closeExportModal() {
+            document.getElementById('exportModal').classList.remove('active');
+        }
+
         async function exportFaces() {
-            if (!confirm('Export all labeled faces to folders?')) return;
+            const outputDir = document.getElementById('output-directory').value.trim();
             
-            const response = await fetch('/api/export', { method: 'POST' });
+            if (!outputDir) {
+                alert('Please specify an output directory');
+                return;
+            }
+            
+            if (!confirm(`Export all labeled faces to ${outputDir}?`)) return;
+            
+            closeExportModal();
+            
+            const response = await fetch('/api/export', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ output_dir: outputDir })
+            });
             const result = await response.json();
             
             if (result.success) {
-                alert(`Exported successfully!\nFaces sorted: ${result.results.total_faces_sorted}\nPersons: ${result.results.persons_processed}`);
+                alert(`Exported successfully!\nFaces sorted: ${result.results.total_faces_sorted}\nPersons: ${result.results.persons_processed}\nOutput: ${result.output_dir}\nDB Backup: ${result.db_backup}`);
+                loadStats();
+            } else {
+                alert(`Export failed: ${result.error || 'Unknown error'}`);
             }
+        }
+
+        // Show unlabeled faces modal
+        async function showUnlabeledFaces() {
+            document.getElementById('unlabeledFacesModal').classList.add('active');
+            
+            const response = await fetch('/api/unlabeled_faces');
+            const faces = await response.json();
+            
+            const container = document.getElementById('unlabeled-faces-grid');
+            
+            if (faces.length === 0) {
+                container.innerHTML = '<div class="loading">No unlabeled faces found</div>';
+                return;
+            }
+            
+            container.innerHTML = '';
+            
+            faces.forEach(face => {
+                const faceDiv = document.createElement('div');
+                faceDiv.className = 'face-item';
+                faceDiv.dataset.faceId = face.id;
+                faceDiv.style.cursor = 'pointer';
+                faceDiv.onclick = () => selectFaceForAssignment(face.id);
+                
+                faceDiv.innerHTML = `
+                    <img src="${face.image}" alt="Face">
+                    <div style="font-size: 11px; color: #666; margin-top: 5px;">
+                        ID: ${face.id}
+                    </div>
+                `;
+                
+                container.appendChild(faceDiv);
+            });
+        }
+
+        function closeUnlabeledFacesModal() {
+            document.getElementById('unlabeledFacesModal').classList.remove('active');
+            document.getElementById('search-person').value = '';
+            document.getElementById('person-search-results').style.display = 'none';
+            selectedPerson = null;
+            selectedFaceForAssignment = null;
+        }
+
+        // Select face for assignment
+        function selectFaceForAssignment(faceId) {
+            // Deselect previous
+            document.querySelectorAll('#unlabeled-faces-grid .face-item').forEach(item => {
+                item.style.border = 'none';
+            });
+            
+            // Select this face
+            const faceDiv = document.querySelector(`#unlabeled-faces-grid [data-face-id="${faceId}"]`);
+            faceDiv.style.border = '3px solid #007bff';
+            selectedFaceForAssignment = faceId;
+            
+            // Show instruction if person is selected
+            if (selectedPerson) {
+                if (confirm(`Assign this face to ${selectedPerson.full_name}?`)) {
+                    assignFaceToPerson(faceId, selectedPerson.id);
+                }
+            }
+        }
+
+        // Search persons
+        let searchTimeout;
+        async function searchPersons() {
+            clearTimeout(searchTimeout);
+            
+            const query = document.getElementById('search-person').value.trim();
+            const resultsDiv = document.getElementById('person-search-results');
+            
+            if (query.length < 2) {
+                resultsDiv.style.display = 'none';
+                return;
+            }
+            
+            searchTimeout = setTimeout(async () => {
+                const response = await fetch(`/api/search_persons?q=${encodeURIComponent(query)}`);
+                const persons = await response.json();
+                
+                if (persons.length === 0) {
+                    resultsDiv.innerHTML = '<div style="padding: 10px; color: #999;">No persons found</div>';
+                    resultsDiv.style.display = 'block';
+                    return;
+                }
+                
+                resultsDiv.innerHTML = '';
+                resultsDiv.style.display = 'block';
+                
+                persons.forEach(person => {
+                    const personDiv = document.createElement('div');
+                    personDiv.style.padding = '10px';
+                    personDiv.style.cursor = 'pointer';
+                    personDiv.style.borderBottom = '1px solid #eee';
+                    personDiv.onmouseover = () => personDiv.style.background = '#f0f0f0';
+                    personDiv.onmouseout = () => personDiv.style.background = 'white';
+                    personDiv.onclick = () => selectPerson(person);
+                    
+                    personDiv.innerHTML = `
+                        <strong>${person.full_name}</strong>
+                        <div style="font-size: 12px; color: #666;">${person.face_count} faces</div>
+                    `;
+                    
+                    resultsDiv.appendChild(personDiv);
+                });
+            }, 300);
+        }
+
+        // Select person for assignment
+        function selectPerson(person) {
+            selectedPerson = person;
+            document.getElementById('search-person').value = person.full_name;
+            document.getElementById('person-search-results').style.display = 'none';
+            
+            if (selectedFaceForAssignment) {
+                if (confirm(`Assign selected face to ${person.full_name}?`)) {
+                    assignFaceToPerson(selectedFaceForAssignment, person.id);
+                }
+            } else {
+                alert(`Selected ${person.full_name}. Now click a face to assign it.`);
+            }
+        }
+
+        // Assign face to person
+        async function assignFaceToPerson(faceId, personId) {
+            const response = await fetch('/api/assign_face', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ face_id: faceId, person_id: personId })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                // Remove face from grid
+                const faceDiv = document.querySelector(`#unlabeled-faces-grid [data-face-id="${faceId}"]`);
+                if (faceDiv) {
+                    faceDiv.remove();
+                }
+                
+                // Reset selection
+                selectedFaceForAssignment = null;
+                
+                // Check if no more faces
+                const remainingFaces = document.querySelectorAll('#unlabeled-faces-grid .face-item');
+                if (remainingFaces.length === 0) {
+                    document.getElementById('unlabeled-faces-grid').innerHTML = '<div class="loading">No unlabeled faces found</div>';
+                }
+                
+                loadStats();
+                alert('Face assigned successfully!');
+            } else {
+                alert(`Failed to assign face: ${result.error}`);
+            }
+        }
+
+        // Tab switching
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`${tabName}-tab`).classList.add('active');
+            
+            // Load data for the tab
+            if (tabName === 'people') {
+                loadPeople();
+            } else if (tabName === 'clusters') {
+                loadClusters();
+            }
+        }
+
+        // Load people
+        async function loadPeople() {
+            const sortBy = document.getElementById('sortBy').value;
+            const sortOrder = document.getElementById('sortOrder').value;
+            
+            const response = await fetch('/api/persons');
+            let persons = await response.json();
+            
+            // Sort persons
+            persons.sort((a, b) => {
+                let aVal, bVal;
+                
+                if (sortBy === 'name') {
+                    aVal = a.name.toLowerCase();
+                    bVal = b.name.toLowerCase();
+                } else if (sortBy === 'surname') {
+                    aVal = a.surname.toLowerCase();
+                    bVal = b.surname.toLowerCase();
+                } else if (sortBy === 'instagram') {
+                    aVal = (a.instagram || '').toLowerCase();
+                    bVal = (b.instagram || '').toLowerCase();
+                } else if (sortBy === 'face_count') {
+                    aVal = a.face_count;
+                    bVal = b.face_count;
+                }
+                
+                if (sortOrder === 'asc') {
+                    return aVal > bVal ? 1 : -1;
+                } else {
+                    return aVal < bVal ? 1 : -1;
+                }
+            });
+            
+            const container = document.getElementById('people-list');
+            
+            if (persons.length === 0) {
+                container.innerHTML = '<div class="loading">No persons found. Label some clusters first!</div>';
+                return;
+            }
+            
+            container.innerHTML = '';
+            
+            persons.forEach(person => {
+                const card = document.createElement('div');
+                card.className = 'person-card';
+                
+                // Create photos grid
+                let photosHTML = '';
+                if (person.preview) {
+                    // Show preview image (we'll fetch more when clicking)
+                    photosHTML = `<img src="${person.preview}" alt="Preview">`;
+                } else {
+                    photosHTML = '<div style="padding: 20px; text-align: center; color: #999;">No photos</div>';
+                }
+                
+                const instagramHTML = person.instagram 
+                    ? `<div class="person-instagram">@${person.instagram}</div>` 
+                    : '';
+                
+                const confirmedBadge = person.is_confirmed 
+                    ? '<span class="cluster-badge badge-labeled">Confirmed</span>' 
+                    : '<span class="cluster-badge badge-unlabeled">Pending</span>';
+                
+                card.innerHTML = `
+                    <div class="person-header">
+                        <div class="person-name">${person.name} ${person.surname} ${confirmedBadge}</div>
+                        ${instagramHTML}
+                        <div class="person-stats">${person.face_count} face${person.face_count !== 1 ? 's' : ''}</div>
+                    </div>
+                    <div class="person-photos" onclick="openPersonDetails(${person.id})">
+                        ${photosHTML}
+                    </div>
+                    <div class="person-actions">
+                        <button class="btn btn-primary" onclick="openPersonDetails(${person.id}); event.stopPropagation();">View All Photos</button>
+                    </div>
+                `;
+                
+                container.appendChild(card);
+            });
+        }
+
+        // Open person details modal
+        async function openPersonDetails(personId) {
+            document.getElementById('personModal').classList.add('active');
+            
+            const response = await fetch('/api/persons');
+            const persons = await response.json();
+            const person = persons.find(p => p.id === personId);
+            
+            if (!person) {
+                alert('Person not found');
+                return;
+            }
+            
+            document.getElementById('person-modal-name').textContent = `${person.name} ${person.surname}`;
+            
+            let infoText = `${person.face_count} face${person.face_count !== 1 ? 's' : ''}`;
+            if (person.instagram) {
+                infoText += ` • Instagram: @${person.instagram}`;
+            }
+            document.getElementById('person-modal-info').textContent = infoText;
+            
+            // Fetch all faces for this person
+            const facesResponse = await fetch(`/api/person/${personId}/faces`);
+            const faces = await facesResponse.json();
+            
+            const container = document.getElementById('person-modal-faces');
+            
+            if (faces.length === 0) {
+                container.innerHTML = '<div class="loading">No faces found</div>';
+                return;
+            }
+            
+            container.innerHTML = '';
+            
+            faces.forEach(face => {
+                const faceDiv = document.createElement('div');
+                faceDiv.className = 'face-item';
+                
+                faceDiv.innerHTML = `
+                    <img src="${face.image}" alt="Face">
+                    <div style="font-size: 11px; color: #666; margin-top: 5px;">
+                        Confidence: ${(face.confidence * 100).toFixed(1)}%
+                    </div>
+                `;
+                
+                container.appendChild(faceDiv);
+            });
+        }
+
+        function closePersonModal() {
+            document.getElementById('personModal').classList.remove('active');
         }
 
         // Initialize

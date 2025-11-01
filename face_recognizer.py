@@ -1,36 +1,58 @@
-"""Face recognition module using FaceNet (TensorFlow-based)."""
+"""Face recognition module using DeepFace."""
 
 import numpy as np
-from keras_facenet import FaceNet
+from deepface import DeepFace
 from typing import List
 import config
+import cv2
 
 
 class FaceRecognizer:
-    """Generates face embeddings using FaceNet model."""
+    """Generates face embeddings using DeepFace with Facenet512 model."""
     
     def __init__(self):
-        """Initialize the FaceNet model."""
-        self.model = FaceNet()
+        """Initialize the DeepFace model."""
+        # Use Facenet512 which gives 512-dimensional embeddings
+        self.model_name = "Facenet512"
+        # Pre-load the model to avoid loading it every time
+        print(f"Loading {self.model_name} model...")
+        DeepFace.build_model(self.model_name)
+        print(f"{self.model_name} model loaded successfully")
     
     def get_embedding(self, face_image: np.ndarray) -> np.ndarray:
         """
         Generate face embedding for a single face.
         
         Args:
-            face_image: Preprocessed face image (160x160, normalized)
+            face_image: Preprocessed face image (RGB, normalized to [-1, 1] or [0, 255])
             
         Returns:
             Face embedding vector (512-dimensional)
         """
-        # Ensure the image has the right shape
-        if len(face_image.shape) == 3:
-            face_image = np.expand_dims(face_image, axis=0)
+        # DeepFace expects BGR and uint8 [0-255]
+        # Our face_image is RGB, normalized to [-1, 1]
         
-        # Generate embedding
-        embedding = self.model.embeddings(face_image)
+        # Convert from [-1, 1] to [0, 255]
+        if face_image.max() <= 1.0:
+            face_uint8 = ((face_image + 1.0) * 127.5).astype(np.uint8)
+        else:
+            face_uint8 = face_image.astype(np.uint8)
         
-        return embedding[0]
+        # Convert RGB to BGR for DeepFace/OpenCV
+        face_bgr = cv2.cvtColor(face_uint8, cv2.COLOR_RGB2BGR)
+        
+        # Generate embedding using DeepFace
+        embedding_objs = DeepFace.represent(
+            img_path=face_bgr,
+            model_name=self.model_name,
+            enforce_detection=False,  # We already detected the face
+            detector_backend='skip'    # Skip detection, use the image as-is
+        )
+        
+        # Extract the embedding vector from the result
+        embedding = np.array(embedding_objs[0]["embedding"])
+        
+        return embedding
     
     def get_embeddings_batch(self, face_images: List[np.ndarray]) -> np.ndarray:
         """
@@ -45,13 +67,13 @@ class FaceRecognizer:
         if not face_images:
             return np.array([])
         
-        # Stack images into batch
-        batch = np.array(face_images)
+        # Process each face individually
+        embeddings = []
+        for face_image in face_images:
+            embedding = self.get_embedding(face_image)
+            embeddings.append(embedding)
         
-        # Generate embeddings
-        embeddings = self.model.embeddings(batch)
-        
-        return embeddings
+        return np.array(embeddings)
     
     def calculate_distance(self, embedding1: np.ndarray, 
                           embedding2: np.ndarray) -> float:

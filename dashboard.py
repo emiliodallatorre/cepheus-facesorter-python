@@ -236,6 +236,29 @@ def get_persons():
     return jsonify(result)
 
 
+@app.route('/api/person/<int:person_id>/faces')
+def get_person_faces(person_id):
+    """Get all faces for a specific person."""
+    db = get_db()
+    faces = db.get_faces_by_person(person_id)
+    
+    result = []
+    for face in faces:
+        img_data = face_image_to_base64(face)
+        if img_data:
+            result.append({
+                'id': int(face['id']),
+                'image': img_data,
+                'confidence': float(face['confidence']),
+                'file_path': str(face['original_image_path'])
+            })
+    
+    return jsonify(result)
+
+
+@app.route('/api/unlabeled_faces')
+
+
 @app.route('/api/scan', methods=['POST'])
 def scan_faces():
     """Scan directory for faces."""
@@ -372,17 +395,105 @@ def cluster_faces():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/unlabeled_faces')
+def get_unlabeled_faces():
+    """Get all unlabeled faces (faces without a person_id)."""
+    db = get_db()
+    unlabeled = db.get_unlabeled_faces()
+    
+    # Group by original image for better display
+    face_data = []
+    for face in unlabeled:
+        img_data = face_image_to_base64(face)
+        if img_data:
+            face_data.append({
+                'id': int(face['id']),
+                'image': img_data,
+                'confidence': float(face['confidence']),
+                'cluster_id': int(face['cluster_id']) if face.get('cluster_id') is not None else None,
+                'file_path': str(face['original_image_path'])
+            })
+    
+    return jsonify(face_data)
+
+
+@app.route('/api/assign_face', methods=['POST'])
+def assign_face_to_person():
+    """Manually assign a face to a person."""
+    data = request.json
+    face_id = data.get('face_id')
+    person_id = data.get('person_id')
+    
+    if not face_id or not person_id:
+        return jsonify({'success': False, 'error': 'face_id and person_id required'}), 400
+    
+    db = get_db()
+    
+    # Verify person exists
+    person = db.get_person(person_id)
+    if not person:
+        return jsonify({'success': False, 'error': 'Person not found'}), 404
+    
+    # Assign face to person
+    db.update_face_person(face_id, person_id)
+    
+    return jsonify({'success': True})
+
+
+@app.route('/api/search_persons')
+def search_persons():
+    """Search for persons by name."""
+    query = request.args.get('q', '').lower().strip()
+    
+    if not query:
+        return jsonify([])
+    
+    db = get_db()
+    all_persons = db.get_all_persons()
+    
+    # Filter persons by name match
+    results = []
+    for person in all_persons:
+        full_name = f"{person['name']} {person['surname']}".lower()
+        if query in full_name:
+            results.append({
+                'id': int(person['id']),
+                'name': str(person['name']),
+                'surname': str(person['surname']),
+                'full_name': f"{person['name']} {person['surname']}",
+                'face_count': len(db.get_faces_by_person(person['id']))
+            })
+    
+    return jsonify(results)
+
+
 @app.route('/api/export', methods=['POST'])
 def export_faces():
     """Export all confirmed persons to folders."""
-    db = get_db()
-    sorter = FaceSorter(db)
+    import shutil
+    from datetime import datetime
     
+    data = request.get_json() or {}
+    output_dir = data.get('output_dir', './output')
+    
+    db = get_db()
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Export faces to folders
+    sorter = FaceSorter(db, output_dir=output_dir)
     results = sorter.sort_all_labeled_faces()
+    
+    # Copy database to output directory
+    db_backup_path = os.path.join(output_dir, f'faces_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.db')
+    shutil.copy2(config.DATABASE_PATH, db_backup_path)
     
     return jsonify({
         'success': True,
-        'results': results
+        'results': results,
+        'db_backup': db_backup_path,
+        'output_dir': output_dir
     })
 
 

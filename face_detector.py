@@ -60,6 +60,9 @@ class FaceDetector:
                 width = min(width, rgb_image.shape[1] - x)
                 height = min(height, rgb_image.shape[0] - y)
                 
+                # Calculate face area (used for size-based filtering)
+                area = width * height
+                
                 # Extract face region
                 face_image = rgb_image[y:y+height, x:x+width]
                 
@@ -67,8 +70,31 @@ class FaceDetector:
                     'box': (x, y, width, height),
                     'confidence': confidence,
                     'keypoints': detection['keypoints'],
-                    'image': face_image
+                    'image': face_image,
+                    'area': area
                 })
+        
+        # Filter faces by size: keep max 2 faces, second must be >= 75% size of largest
+        if len(faces) > 1:
+            # Sort by area (largest first)
+            faces.sort(key=lambda f: f['area'], reverse=True)
+            
+            # Keep largest face
+            filtered_faces = [faces[0]]
+            
+            # Check if second largest is at least 75% the size of the largest
+            if len(faces) > 1:
+                largest_area = faces[0]['area']
+                second_area = faces[1]['area']
+                
+                if second_area >= 0.75 * largest_area:
+                    filtered_faces.append(faces[1])
+            
+            faces = filtered_faces
+        
+        # Remove the 'area' field before returning (not needed by caller)
+        for face in faces:
+            face.pop('area', None)
         
         return faces
     
