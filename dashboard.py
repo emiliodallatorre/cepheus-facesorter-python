@@ -225,6 +225,18 @@ def remove_face_from_cluster(cluster_id):
     return jsonify({'success': True})
 
 
+@app.route('/api/face/<int:face_id>/remove', methods=['POST'])
+def remove_face(face_id):
+    """Mark a face as removed or restore it."""
+    data = request.get_json() or {}
+    removed = data.get('removed', True)  # Default to True for backward compatibility
+    
+    db = get_db()
+    db.mark_face_removed(face_id, removed=removed)
+    
+    return jsonify({'success': True, 'removed': removed})
+
+
 @app.route('/api/cluster/<int:cluster_id>/label', methods=['POST'])
 def label_cluster(cluster_id):
     """Label a cluster with person information."""
@@ -301,13 +313,14 @@ def get_person_faces(person_id):
                 'id': int(face['id']),
                 'image': img_data,
                 'confidence': float(face['confidence']),
-                'file_path': str(face['original_image_path'])
+                'file_path': str(face['original_image_path']),
+                'is_removed': bool(face.get('is_removed', False))
             })
     
+    # Sort by confidence ascending (lowest confidence first)
+    result.sort(key=lambda x: x['confidence'])
+    
     return jsonify(result)
-
-
-@app.route('/api/unlabeled_faces')
 
 
 def send_progress_update(session_id, data):

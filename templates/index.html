@@ -718,6 +718,45 @@
             }
         }
 
+        // Toggle remove face from person view
+        async function toggleRemovePersonFace(event, faceId) {
+            event.stopPropagation();
+            const faceDiv = document.querySelector(`#person-modal-faces [data-face-id="${faceId}"]`);
+            const btn = event.target.closest('button');
+            
+            if (!faceDiv) return;
+            
+            const isRemoved = faceDiv.classList.contains('removed');
+            
+            try {
+                if (isRemoved) {
+                    // Undo removal
+                    await fetch(`/api/face/${faceId}/remove`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ removed: false })
+                    });
+                    
+                    faceDiv.classList.remove('removed');
+                    btn.innerHTML = '<i class="bi bi-x-circle me-1"></i>Remove';
+                    btn.className = 'btn btn-sm btn-outline-danger mt-2 w-100';
+                } else {
+                    // Remove face
+                    const response = await fetch(`/api/face/${faceId}/remove`, {
+                        method: 'POST'
+                    });
+                    
+                    if (response.ok) {
+                        faceDiv.classList.add('removed');
+                        btn.innerHTML = '<i class="bi bi-arrow-counterclockwise me-1"></i>Undo';
+                        btn.className = 'btn btn-sm btn-outline-secondary mt-2 w-100';
+                    }
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        }
+
         // Label cluster
         async function labelCluster() {
             const name = document.getElementById('input-name').value.trim();
@@ -1229,12 +1268,30 @@
             faces.forEach(face => {
                 const faceDiv = document.createElement('div');
                 faceDiv.className = 'face-item';
+                faceDiv.dataset.faceId = face.id;
+                
+                if (face.is_removed) {
+                    faceDiv.classList.add('removed');
+                }
+                
+                // Determine confidence color
+                let confidenceClass = 'text-success';
+                if (face.confidence < 0.95) confidenceClass = 'text-warning';
+                if (face.confidence < 0.90) confidenceClass = 'text-danger';
+                
+                // Button state based on removed status
+                const btnClass = face.is_removed ? 'btn btn-sm btn-outline-secondary mt-2 w-100' : 'btn btn-sm btn-outline-danger mt-2 w-100';
+                const btnIcon = face.is_removed ? 'bi-arrow-counterclockwise' : 'bi-x-circle';
+                const btnText = face.is_removed ? 'Undo' : 'Remove';
                 
                 faceDiv.innerHTML = `
-                    <img src="${face.image}" alt="Face">
-                    <small class="text-muted d-block mt-2">
+                    <img src="${face.image}" alt="Face" onclick="viewFullImage(${face.id})" style="cursor: pointer;" title="Click to view full image">
+                    <small class="d-block mt-2 ${confidenceClass}">
                         Confidence: ${(face.confidence * 100).toFixed(1)}%
                     </small>
+                    <button class="${btnClass}" onclick="toggleRemovePersonFace(event, ${face.id})">
+                        <i class="bi ${btnIcon} me-1"></i>${btnText}
+                    </button>
                 `;
                 
                 container.appendChild(faceDiv);
