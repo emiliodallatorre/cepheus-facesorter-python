@@ -1,6 +1,6 @@
 """Web dashboard for managing face clusters."""
 
-from flask import Flask, render_template, jsonify, request, send_file
+from flask import Flask, render_template, jsonify, request, send_file, Response, stream_with_context
 from flask_cors import CORS
 import os
 import base64
@@ -8,6 +8,10 @@ from io import BytesIO
 from PIL import Image
 import cv2
 import numpy as np
+import json
+import time
+import queue
+import threading
 
 import config
 from database import DatabaseManager
@@ -16,6 +20,10 @@ from face_sorter import FaceSorter
 
 app = Flask(__name__)
 CORS(app)
+
+# Global progress queue for SSE
+progress_queues = {}
+progress_lock = threading.Lock()
 
 db_manager = None
 
@@ -262,6 +270,49 @@ def get_person_faces(person_id):
 @app.route('/api/unlabeled_faces')
 
 
+def send_progress_update(session_id, data):
+    """Send progress update to specific session."""
+    with progress_lock:
+        if session_id in progress_queues:
+            try:
+                progress_queues[session_id].put_nowait(data)
+            except:
+                pass
+
+
+@app.route('/api/scan/progress/<session_id>')
+def scan_progress(session_id):
+    """Server-Sent Events endpoint for scan progress."""
+    def generate():
+        # Create queue for this session
+        with progress_lock:
+            progress_queues[session_id] = queue.Queue()
+        
+        try:
+            while True:
+                try:
+                    # Get progress data from queue (timeout after 30 seconds)
+                    data = progress_queues[session_id].get(timeout=30)
+                    
+                    # Send SSE message
+                    yield f"data: {json.dumps(data)}\n\n"
+                    
+                    # If complete, end stream
+                    if data.get('status') == 'complete' or data.get('status') == 'error':
+                        break
+                        
+                except queue.Empty:
+                    # Send heartbeat to keep connection alive
+                    yield f"data: {json.dumps({'status': 'heartbeat'})}\n\n"
+        finally:
+            # Clean up queue
+            with progress_lock:
+                if session_id in progress_queues:
+                    del progress_queues[session_id]
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
+
 @app.route('/api/scan', methods=['POST'])
 def scan_faces():
     """Scan directory for faces."""
@@ -272,6 +323,7 @@ def scan_faces():
     data = request.get_json()
     directory = data.get('directory', './photos')
     force = data.get('force', False)
+    session_id = data.get('session_id')  # Get session ID for progress tracking
     
     if not os.path.exists(directory):
         return jsonify({'success': False, 'error': f'Directory not found: {directory}'}), 404
@@ -295,8 +347,45 @@ def scan_faces():
         'errors': 0
     }
     
-    for img_path in image_paths:
+    # Send initial progress
+    if session_id:
+        send_progress_update(session_id, {
+            'status': 'scanning',
+            'progress': 0,
+            'total': len(image_paths),
+            'current': 0,
+            'message': f'Found {len(image_paths)} images to scan...',
+            'stats': stats
+        })
+    
+    print(f"\n{'='*60}")
+    print(f"🔍 Starting face scan of {len(image_paths)} images")
+    print(f"{'='*60}\n")
+    
+    for idx, img_path in enumerate(image_paths):
         try:
+            filename = os.path.basename(img_path)
+            
+            # Terminal progress (every 10 images or at start/end)
+            if idx % 10 == 0 or idx == len(image_paths) - 1:
+                progress_percent = int((idx / len(image_paths)) * 100)
+                bar_length = 40
+                filled = int(bar_length * idx / len(image_paths))
+                bar = '█' * filled + '░' * (bar_length - filled)
+                print(f"\r[{bar}] {progress_percent}% | {idx}/{len(image_paths)} | 👤 {stats['faces_found']} faces | {filename[:30]:<30}", end='', flush=True)
+            
+            # Send progress update to frontend
+            if session_id and idx % 5 == 0:  # Update every 5 images to avoid flooding
+                progress_percent = int((idx / len(image_paths)) * 100)
+                send_progress_update(session_id, {
+                    'status': 'scanning',
+                    'progress': progress_percent,
+                    'total': len(image_paths),
+                    'current': idx,
+                    'message': f'Processing: {filename}',
+                    'stats': stats
+                })
+            
             # Check if already processed
             if not force:
                 existing_faces = db.get_faces_by_image(img_path)
@@ -335,7 +424,29 @@ def scan_faces():
             
         except Exception as e:
             stats['errors'] += 1
-            print(f"Error processing {img_path}: {e}")
+            print(f"\n❌ Error processing {img_path}: {e}")
+    
+    # Final terminal output
+    print(f"\n\n{'='*60}")
+    print(f"✅ Scan Complete!")
+    print(f"{'='*60}")
+    print(f"📊 Total images:  {stats['total_images']}")
+    print(f"✔️  Processed:     {stats['processed']}")
+    print(f"👤 Faces found:   {stats['faces_found']}")
+    print(f"⏭️  Skipped:       {stats['skipped']}")
+    print(f"❌ Errors:        {stats['errors']}")
+    print(f"{'='*60}\n")
+    
+    # Send completion
+    if session_id:
+        send_progress_update(session_id, {
+            'status': 'complete',
+            'progress': 100,
+            'total': len(image_paths),
+            'current': len(image_paths),
+            'message': f'Scan complete! Found {stats["faces_found"]} faces',
+            'stats': stats
+        })
     
     return jsonify({'success': True, 'stats': stats})
 
@@ -503,7 +614,8 @@ def export_faces():
 
 def run_dashboard(host='127.0.0.1', port=5000, debug=True):
     """Run the Flask dashboard."""
-    app.run(host=host, port=port, debug=debug)
+    # Disable reloader to allow code editing without restart
+    app.run(host=host, port=port, debug=debug, use_reloader=False)
 
 
 if __name__ == '__main__':
