@@ -1,0 +1,12 @@
+postgres_cfg:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: postgres
+  database: postgres
+  table_name: image_metadata
+  connection_uri: postgresql+psycopg2://${postgres_cfg.user}:${postgres_cfg.password}@${postgres_cfg.host}:${postgres_cfg.port}/${postgres_cfg.database}
+
+input_path: /Users/emiliodallatorre/Desktop/dataset/unlabeled
+thumbnails_path: /Users/emiliodallatorre/Desktop/dataset/run_dir/thumbnails
+output_path: /Users/emiliodallatorre/Desktop/dataset/run_dir/output
