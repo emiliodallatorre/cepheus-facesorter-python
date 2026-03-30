@@ -43,5 +43,5 @@ def _parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = _parse_args()
     run_face_clustering_flow.serve(
-        "face_clustering_flow", parameters={"config_path": args.config}
+        "face-clustering-flow", parameters={"config_path": args.config}
     )
