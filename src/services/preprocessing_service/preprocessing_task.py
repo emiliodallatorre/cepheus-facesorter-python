@@ -4,6 +4,7 @@ import hashlib
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import boto3
 import pandas as pd
@@ -51,6 +52,36 @@ def _get_minio_client(run_directives: DictConfig) -> tuple[Any, str, str]:
     return client, bucket, prefix
 
 
+def _parse_s3_uri(s3_uri: str) -> tuple[str, str]:
+    parsed_uri = urlparse(s3_uri)
+    if parsed_uri.scheme != "s3" or not parsed_uri.netloc:
+        raise ValueError(f"Expected an s3:// URI, got: {s3_uri}")
+
+    bucket = parsed_uri.netloc
+    prefix = parsed_uri.path.lstrip("/").rstrip("/")
+    return bucket, prefix
+
+
+def _build_s3_uri(bucket: str, prefix: str, object_key: str) -> str:
+    clean_prefix = prefix.strip("/")
+    clean_key = object_key.lstrip("/")
+
+    if clean_prefix:
+        return f"s3://{bucket}/{clean_prefix}/{clean_key}"
+
+    return f"s3://{bucket}/{clean_key}"
+
+
+def _build_object_key(prefix: str, relative_path: Path) -> str:
+    clean_prefix = prefix.strip("/")
+    relative_key = relative_path.as_posix().lstrip("/")
+
+    if clean_prefix:
+        return f"{clean_prefix}/{relative_key}"
+
+    return relative_key
+
+
 def _resolve_input_cache_dir(run_directives: DictConfig) -> Path:
     output_root = Path(run_directives.get("output_path", "./artifacts/preprocessing"))
     input_cache_dir = output_root / "input_cache"
@@ -59,12 +90,12 @@ def _resolve_input_cache_dir(run_directives: DictConfig) -> Path:
 
 
 @task(name="list_input_images")
-def _list_input_images(run_directives: DictConfig) -> list[Path]:
+def _list_input_images(run_directives: DictConfig) -> list[dict[str, str]]:
     minio_client, bucket, prefix = _get_minio_client(run_directives)
     input_cache_dir = _resolve_input_cache_dir(run_directives)
 
     paginator = minio_client.get_paginator("list_objects_v2")
-    image_paths: list[Path] = []
+    image_records: list[dict[str, str]] = []
 
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix or ""):
         for object_summary in page.get("Contents", []):
@@ -83,20 +114,26 @@ def _list_input_images(run_directives: DictConfig) -> list[Path]:
             local_path = input_cache_dir / relative_key
             local_path.parent.mkdir(parents=True, exist_ok=True)
             minio_client.download_file(bucket, object_key, str(local_path))
-            image_paths.append(local_path)
+            image_records.append(
+                {
+                    "image_path": str(local_path),
+                    "source_key": relative_key.as_posix(),
+                }
+            )
 
-    return sorted(image_paths)
+    return sorted(image_records, key=lambda record: record["source_key"])
 
 
 @task(name="build_images_dataframe")
-def _build_images_dataframe(image_paths: list[Path]) -> DataFrame:
+def _build_images_dataframe(image_records: list[dict[str, str]]) -> DataFrame:
     return pd.DataFrame(
         [
             {
                 "image_id": str(uuid.uuid4()),
-                "image_path": str(path),
+                "image_path": record["image_path"],
+                "source_key": record["source_key"],
             }
-            for path in image_paths
+            for record in image_records
         ]
     )
 
@@ -126,10 +163,9 @@ def _add_hash_metadata(images_df: DataFrame) -> DataFrame:
 
 
 def _resolve_output_paths(run_directives: DictConfig) -> tuple[Path, Path]:
-    base_output = Path(run_directives.get("output_path", "./artifacts/preprocessing"))
-    thumbnails_dir = Path(
-        run_directives.get("thumbnails_path", base_output / "thumbnails")
-    )
+    work_root = Path(run_directives.get("local_work_dir", "./artifacts/preprocessing"))
+    base_output = work_root / "output"
+    thumbnails_dir = work_root / "thumbnails"
 
     base_output.mkdir(parents=True, exist_ok=True)
     thumbnails_dir.mkdir(parents=True, exist_ok=True)
@@ -138,8 +174,15 @@ def _resolve_output_paths(run_directives: DictConfig) -> tuple[Path, Path]:
 
 def _correct_orientation_and_generate_thumbnail(
     image_path: Path,
+    source_key: str,
     thumbnails_dir: Path,
+    output_dir: Path,
     thumbnail_size: tuple[int, int],
+    minio_client: Any,
+    output_bucket: str,
+    output_prefix: str,
+    thumbnails_bucket: str,
+    thumbnails_prefix: str,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "thumbnail_path": None,
@@ -153,15 +196,35 @@ def _correct_orientation_and_generate_thumbnail(
             oriented_image = ImageOps.exif_transpose(image)
             result["width"], result["height"] = oriented_image.size
 
-            # Persist corrected orientation in place.
-            oriented_image.save(image_path)
+            relative_path = Path(source_key)
+
+            output_local_path = output_dir / relative_path
+            output_local_path.parent.mkdir(parents=True, exist_ok=True)
+            oriented_image.save(output_local_path)
+
+            output_object_key = _build_object_key(output_prefix, relative_path)
+            minio_client.upload_file(
+                str(output_local_path), output_bucket, output_object_key
+            )
 
             thumbnail = oriented_image.copy()
             thumbnail.thumbnail(thumbnail_size)
-            thumbnail_name = f"{image_path.stem}_thumb{image_path.suffix.lower()}"
-            thumbnail_path = thumbnails_dir / thumbnail_name
+            thumbnail_relative_path = relative_path.with_name(
+                f"{relative_path.stem}_thumb{relative_path.suffix.lower()}"
+            )
+            thumbnail_path = thumbnails_dir / thumbnail_relative_path
+            thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
             thumbnail.save(thumbnail_path)
-            result["thumbnail_path"] = str(thumbnail_path)
+
+            thumbnail_object_key = _build_object_key(
+                thumbnails_prefix, thumbnail_relative_path
+            )
+            minio_client.upload_file(
+                str(thumbnail_path), thumbnails_bucket, thumbnail_object_key
+            )
+            result["thumbnail_path"] = _build_s3_uri(
+                thumbnails_bucket, thumbnails_prefix, thumbnail_object_key
+            )
     except Exception as exc:  # noqa: BLE001
         result["preprocessing_error"] = str(exc)
 
@@ -180,19 +243,40 @@ def _apply_image_transformations(
     images_df: DataFrame, run_directives: DictConfig
 ) -> DataFrame:
     images_df = images_df.copy()
-    _, thumbnails_dir = _resolve_output_paths(run_directives)
+    minio_client, output_bucket, output_prefix = _get_minio_client(run_directives)
+    output_uri = str(run_directives.get("output_path"))
+    thumbnails_uri = str(run_directives.get("thumbnails_path"))
+    thumbnails_bucket, thumbnails_prefix = _parse_s3_uri(thumbnails_uri)
+    resolved_output_bucket, resolved_output_prefix = _parse_s3_uri(output_uri)
+    output_dir, thumbnails_dir = _resolve_output_paths(run_directives)
 
     thumbnail_width = int(run_directives.get("thumbnail_width", 256))
     thumbnail_height = int(run_directives.get("thumbnail_height", 256))
     thumbnail_size = (thumbnail_width, thumbnail_height)
 
-    transform_results = images_df["image_path"].map(
-        lambda value: _correct_orientation_and_generate_thumbnail(
-            image_path=Path(value),
+    if output_bucket != resolved_output_bucket or output_prefix != resolved_output_prefix:
+        output_bucket = resolved_output_bucket
+        output_prefix = resolved_output_prefix
+
+    transform_results = [
+        _correct_orientation_and_generate_thumbnail(
+            image_path=Path(image_path),
+            source_key=str(source_key),
             thumbnails_dir=thumbnails_dir,
+            output_dir=output_dir,
             thumbnail_size=thumbnail_size,
+            minio_client=minio_client,
+            output_bucket=output_bucket,
+            output_prefix=output_prefix,
+            thumbnails_bucket=thumbnails_bucket,
+            thumbnails_prefix=thumbnails_prefix,
         )
-    )
+        for image_path, source_key in zip(
+            images_df["image_path"], images_df["source_key"]
+        )
+    ]
+
+    transform_results = pd.Series(transform_results, index=images_df.index)
 
     images_df["thumbnail_path"] = transform_results.map(
         lambda value: _get_transformation_field(value, "thumbnail_path")
