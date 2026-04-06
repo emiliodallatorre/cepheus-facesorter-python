@@ -20,6 +20,24 @@ services:
       - "4200:4200"
     networks:
       - facesorter-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4200/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  prefect-worker:
+    image: prefecthq/prefect:3-python3.12
+    container_name: prefect-worker
+    restart: unless-stopped
+    command: ["prefect", "worker", "start", "--pool", "local_docker"]
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+    depends_on:
+      prefect-server:
+        condition: service_healthy  
+    networks:
+      - facesorter-network
 
   minio:
     image: minio/minio:latest
