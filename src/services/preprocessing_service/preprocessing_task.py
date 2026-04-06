@@ -5,33 +5,87 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import boto3
 import pandas as pd
 from omegaconf import DictConfig
 from pandas import DataFrame
 from PIL import Image, ImageOps
+from botocore import UNSIGNED
+from botocore.config import Config
 from prefect import flow, task
 from sqlalchemy import create_engine
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
 
 
-@task(name="list_input_images")
-def _list_input_images(input_path: str) -> list[Path]:
-    root = Path(input_path)
-    if not root.exists():
-        raise FileNotFoundError(f"Input path not found: {root}")
+def _get_minio_config(run_directives: DictConfig) -> DictConfig:
+    minio_cfg = run_directives.get("minio_cfg") or run_directives.get("minio")
+    if minio_cfg is None:
+        raise ValueError("Missing 'minio_cfg' section in run directives.")
 
-    if root.is_file() and root.suffix.lower() in IMAGE_EXTENSIONS:
-        return [root]
+    endpoint = minio_cfg.get("endpoint")
+    bucket = minio_cfg.get("bucket")
 
-    if not root.is_dir():
-        raise ValueError(f"Input path must be a folder or an image file: {root}")
+    if not endpoint:
+        raise ValueError("Missing minio_cfg.endpoint in run directives.")
 
-    return sorted(
-        path
-        for path in root.rglob("*")
-        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+    if not bucket:
+        raise ValueError("Missing minio_cfg.bucket in run directives.")
+
+    return minio_cfg
+
+
+def _get_minio_client(run_directives: DictConfig) -> tuple[Any, str, str]:
+    minio_cfg = _get_minio_config(run_directives)
+    endpoint = str(minio_cfg.get("endpoint"))
+    bucket = str(minio_cfg.get("bucket"))
+    prefix = str(minio_cfg.get("prefix", "")).strip("/")
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        config=Config(signature_version=UNSIGNED, s3={"addressing_style": "path"}),
+        region_name="us-east-1",
     )
+
+    return client, bucket, prefix
+
+
+def _resolve_input_cache_dir(run_directives: DictConfig) -> Path:
+    output_root = Path(run_directives.get("output_path", "./artifacts/preprocessing"))
+    input_cache_dir = output_root / "input_cache"
+    input_cache_dir.mkdir(parents=True, exist_ok=True)
+    return input_cache_dir
+
+
+@task(name="list_input_images")
+def _list_input_images(run_directives: DictConfig) -> list[Path]:
+    minio_client, bucket, prefix = _get_minio_client(run_directives)
+    input_cache_dir = _resolve_input_cache_dir(run_directives)
+
+    paginator = minio_client.get_paginator("list_objects_v2")
+    image_paths: list[Path] = []
+
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix or ""):
+        for object_summary in page.get("Contents", []):
+            object_key = str(object_summary["Key"])
+            if object_key.endswith("/"):
+                continue
+
+            object_suffix = Path(object_key).suffix.lower()
+            if object_suffix not in IMAGE_EXTENSIONS:
+                continue
+
+            relative_key = Path(object_key)
+            if prefix and object_key.startswith(f"{prefix}/"):
+                relative_key = Path(object_key[len(prefix) + 1 :])
+
+            local_path = input_cache_dir / relative_key
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            minio_client.download_file(bucket, object_key, str(local_path))
+            image_paths.append(local_path)
+
+    return sorted(image_paths)
 
 
 @task(name="build_images_dataframe")
@@ -55,11 +109,18 @@ def _compute_file_sha256(file_path: Path) -> str:
     return hash_obj.hexdigest()
 
 
+def _compute_file_sha256_from_value(value: Any) -> str:
+    if not isinstance(value, (str, Path)):
+        raise ValueError(f"Expected a file path, got {type(value).__name__}.")
+
+    return _compute_file_sha256(Path(value))
+
+
 @task(name="add_hash_metadata")
 def _add_hash_metadata(images_df: DataFrame) -> DataFrame:
     images_df = images_df.copy()
     images_df["image_hash"] = images_df["image_path"].map(
-        lambda value: _compute_file_sha256(Path(value))
+        _compute_file_sha256_from_value
     )
     return images_df
 
@@ -107,6 +168,13 @@ def _correct_orientation_and_generate_thumbnail(
     return result
 
 
+def _get_transformation_field(result: Any, field_name: str) -> Any:
+    if not isinstance(result, dict):
+        return None
+
+    return result.get(field_name)
+
+
 @task(name="apply_image_transformations")
 def _apply_image_transformations(
     images_df: DataFrame, run_directives: DictConfig
@@ -127,12 +195,16 @@ def _apply_image_transformations(
     )
 
     images_df["thumbnail_path"] = transform_results.map(
-        lambda value: value["thumbnail_path"]
+        lambda value: _get_transformation_field(value, "thumbnail_path")
     )
-    images_df["width"] = transform_results.map(lambda value: value["width"])
-    images_df["height"] = transform_results.map(lambda value: value["height"])
+    images_df["width"] = transform_results.map(
+        lambda value: _get_transformation_field(value, "width")
+    )
+    images_df["height"] = transform_results.map(
+        lambda value: _get_transformation_field(value, "height")
+    )
     images_df["preprocessing_error"] = transform_results.map(
-        lambda value: value["preprocessing_error"]
+        lambda value: _get_transformation_field(value, "preprocessing_error")
     )
     images_df["status"] = "pending_detection"
     return images_df
@@ -158,8 +230,7 @@ def _save_dataframe_to_postgresql(
 
 @flow(name="preprocessing_flow")
 def preprocessing_task(run_directives: DictConfig) -> DataFrame:
-    input_path = str(run_directives.input_path)
-    image_paths = _list_input_images(input_path)
+    image_paths = _list_input_images(run_directives)
     images_df = _build_images_dataframe(image_paths)
     images_df = _add_hash_metadata(images_df)
     images_df = _apply_image_transformations(images_df, run_directives)

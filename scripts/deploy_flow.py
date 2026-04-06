@@ -20,6 +20,9 @@ if __name__ == "__main__":
             dockerfile="Dockerfile",
         ),
         push=False,
-        job_variables={"image_pull_policy": "Never"},
+        job_variables={
+            "image_pull_policy": "Never",
+            "networks": ["facesorter-network"],
+        },
         parameters={"config_path": "run_directives/default.yml"},
     )

@@ -7,6 +7,10 @@ postgres_cfg:
   table_name: image_metadata
   connection_uri: postgresql+psycopg2://${postgres_cfg.user}:${postgres_cfg.password}@${postgres_cfg.host}:${postgres_cfg.port}/${postgres_cfg.database}
 
-input_path: /Users/emiliodallatorre/Desktop/dataset/unlabeled
+minio_cfg:
+  endpoint: http://minio:9000
+  bucket: unlabeled-images
+  prefix: ""
+
 thumbnails_path: /Users/emiliodallatorre/Desktop/dataset/run_dir/thumbnails
 output_path: /Users/emiliodallatorre/Desktop/dataset/run_dir/output
