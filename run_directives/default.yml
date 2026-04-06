@@ -1,5 +1,5 @@
 postgres_cfg:
-  host: postgres
+  host: localhost
   port: 5432
   user: postgres
   password: postgres
@@ -8,7 +8,9 @@ postgres_cfg:
   connection_uri: postgresql+psycopg2://${postgres_cfg.user}:${postgres_cfg.password}@${postgres_cfg.host}:${postgres_cfg.port}/${postgres_cfg.database}
 
 minio_cfg:
-  endpoint: http://minio:9000
+  endpoint: http://localhost:9000
+  user: minioadmin
+  password: minioadmin
   bucket: unlabeled-images
   prefix: ""
 

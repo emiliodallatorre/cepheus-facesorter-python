@@ -26,19 +26,6 @@ services:
       timeout: 10s
       retries: 5
 
-  prefect-worker:
-    image: prefecthq/prefect:3-python3.12
-    container_name: prefect-worker
-    restart: unless-stopped
-    command: ["prefect", "worker", "start", "--pool", "local_docker"]
-    environment:
-      PREFECT_API_URL: http://prefect-server:4200/api
-    depends_on:
-      prefect-server:
-        condition: service_healthy  
-    networks:
-      - facesorter-network
-
   minio:
     image: minio/minio:latest
     container_name: minio

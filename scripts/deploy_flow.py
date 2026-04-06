@@ -37,5 +37,8 @@ if __name__ == "__main__":
     deployment_flow.deploy(
         name="default",
         work_pool_name="local_docker",
+        job_variables={
+            "working_dir": str(ROOT),
+        },
         parameters={"run_directives": run_directives},
     )

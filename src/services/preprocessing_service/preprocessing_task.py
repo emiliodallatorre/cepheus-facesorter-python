@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 import uuid
 from pathlib import Path
 from typing import Any
@@ -41,13 +42,27 @@ def _get_minio_client(run_directives: DictConfig) -> tuple[Any, str, str]:
     endpoint = str(minio_cfg.get("endpoint"))
     bucket = str(minio_cfg.get("bucket"))
     prefix = str(minio_cfg.get("prefix", "")).strip("/")
+    user = minio_cfg.get("user")
+    password = minio_cfg.get("password")
 
-    client = boto3.client(
-        "s3",
-        endpoint_url=endpoint,
-        config=Config(signature_version=UNSIGNED, s3={"addressing_style": "path"}),
-        region_name="us-east-1",
-    )
+    if user and password:
+        client = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            aws_access_key_id=str(user),
+            aws_secret_access_key=str(password),
+            config=Config(s3={"addressing_style": "path"}),
+            region_name="us-east-1",
+        )
+    else:
+        client = boto3.client(
+            "s3",
+            endpoint_url=endpoint,
+            config=Config(
+                signature_version=UNSIGNED, s3={"addressing_style": "path"}
+            ),
+            region_name="us-east-1",
+        )
 
     return client, bucket, prefix
 
@@ -82,17 +97,17 @@ def _build_object_key(prefix: str, relative_path: Path) -> str:
     return relative_key
 
 
-def _resolve_input_cache_dir(run_directives: DictConfig) -> Path:
-    output_root = Path(run_directives.get("output_path", "./artifacts/preprocessing"))
-    input_cache_dir = output_root / "input_cache"
-    input_cache_dir.mkdir(parents=True, exist_ok=True)
-    return input_cache_dir
+def _get_image_bytes(minio_client: Any, bucket: str, object_key: str) -> bytes:
+    response = minio_client.get_object(Bucket=bucket, Key=object_key)
+    try:
+        return response["Body"].read()
+    finally:
+        response["Body"].close()
 
 
 @task(name="list_input_images")
 def _list_input_images(run_directives: DictConfig) -> list[dict[str, str]]:
     minio_client, bucket, prefix = _get_minio_client(run_directives)
-    input_cache_dir = _resolve_input_cache_dir(run_directives)
 
     paginator = minio_client.get_paginator("list_objects_v2")
     image_records: list[dict[str, str]] = []
@@ -111,12 +126,10 @@ def _list_input_images(run_directives: DictConfig) -> list[dict[str, str]]:
             if prefix and object_key.startswith(f"{prefix}/"):
                 relative_key = Path(object_key[len(prefix) + 1 :])
 
-            local_path = input_cache_dir / relative_key
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-            minio_client.download_file(bucket, object_key, str(local_path))
             image_records.append(
                 {
-                    "image_path": str(local_path),
+                    "image_path": _build_s3_uri(bucket, "", object_key),
+                    "object_key": object_key,
                     "source_key": relative_key.as_posix(),
                 }
             )
@@ -131,6 +144,7 @@ def _build_images_dataframe(image_records: list[dict[str, str]]) -> DataFrame:
             {
                 "image_id": str(uuid.uuid4()),
                 "image_path": record["image_path"],
+                "object_key": record["object_key"],
                 "source_key": record["source_key"],
             }
             for record in image_records
@@ -138,45 +152,47 @@ def _build_images_dataframe(image_records: list[dict[str, str]]) -> DataFrame:
     )
 
 
-def _compute_file_sha256(file_path: Path) -> str:
+def _compute_bytes_sha256(content: bytes) -> str:
     hash_obj = hashlib.sha256()
-    with file_path.open("rb") as file:
-        for chunk in iter(lambda: file.read(8192), b""):
-            hash_obj.update(chunk)
+    hash_obj.update(content)
     return hash_obj.hexdigest()
 
 
-def _compute_file_sha256_from_value(value: Any) -> str:
-    if not isinstance(value, (str, Path)):
-        raise ValueError(f"Expected a file path, got {type(value).__name__}.")
+def _compute_object_sha256(minio_client: Any, bucket: str, object_key: str) -> str:
+    image_bytes = _get_image_bytes(minio_client, bucket, object_key)
+    return _compute_bytes_sha256(image_bytes)
 
-    return _compute_file_sha256(Path(value))
 
 
 @task(name="add_hash_metadata")
-def _add_hash_metadata(images_df: DataFrame) -> DataFrame:
+def _add_hash_metadata(images_df: DataFrame, run_directives: DictConfig) -> DataFrame:
     images_df = images_df.copy()
-    images_df["image_hash"] = images_df["image_path"].map(
-        _compute_file_sha256_from_value
-    )
+    minio_client, bucket, _ = _get_minio_client(run_directives)
+    images_df["image_hash"] = [
+        _compute_object_sha256(minio_client, bucket, str(object_key))
+        for object_key in images_df["object_key"]
+    ]
     return images_df
 
 
-def _resolve_output_paths(run_directives: DictConfig) -> tuple[Path, Path]:
-    work_root = Path(run_directives.get("local_work_dir", "./artifacts/preprocessing"))
-    base_output = work_root / "output"
-    thumbnails_dir = work_root / "thumbnails"
+def _resolve_pillow_format(source_key: str) -> str:
+    suffix = Path(source_key).suffix.lower()
+    format_by_suffix = {
+        ".jpg": "JPEG",
+        ".jpeg": "JPEG",
+        ".png": "PNG",
+        ".bmp": "BMP",
+        ".tif": "TIFF",
+        ".tiff": "TIFF",
+        ".webp": "WEBP",
+    }
 
-    base_output.mkdir(parents=True, exist_ok=True)
-    thumbnails_dir.mkdir(parents=True, exist_ok=True)
-    return base_output, thumbnails_dir
+    return format_by_suffix.get(suffix, "JPEG")
 
 
 def _correct_orientation_and_generate_thumbnail(
-    image_path: Path,
+    image_bytes: bytes,
     source_key: str,
-    thumbnails_dir: Path,
-    output_dir: Path,
     thumbnail_size: tuple[int, int],
     minio_client: Any,
     output_bucket: str,
@@ -192,35 +208,34 @@ def _correct_orientation_and_generate_thumbnail(
     }
 
     try:
-        with Image.open(image_path) as image:
+        with Image.open(BytesIO(image_bytes)) as image:
             oriented_image = ImageOps.exif_transpose(image)
             result["width"], result["height"] = oriented_image.size
 
             relative_path = Path(source_key)
+            image_format = image.format or _resolve_pillow_format(source_key)
 
-            output_local_path = output_dir / relative_path
-            output_local_path.parent.mkdir(parents=True, exist_ok=True)
-            oriented_image.save(output_local_path)
+            output_buffer = BytesIO()
+            oriented_image.save(output_buffer, format=image_format)
+            output_buffer.seek(0)
 
             output_object_key = _build_object_key(output_prefix, relative_path)
-            minio_client.upload_file(
-                str(output_local_path), output_bucket, output_object_key
-            )
+            minio_client.upload_fileobj(output_buffer, output_bucket, output_object_key)
 
             thumbnail = oriented_image.copy()
             thumbnail.thumbnail(thumbnail_size)
             thumbnail_relative_path = relative_path.with_name(
                 f"{relative_path.stem}_thumb{relative_path.suffix.lower()}"
             )
-            thumbnail_path = thumbnails_dir / thumbnail_relative_path
-            thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
-            thumbnail.save(thumbnail_path)
+            thumbnail_buffer = BytesIO()
+            thumbnail.save(thumbnail_buffer, format=image_format)
+            thumbnail_buffer.seek(0)
 
             thumbnail_object_key = _build_object_key(
                 thumbnails_prefix, thumbnail_relative_path
             )
-            minio_client.upload_file(
-                str(thumbnail_path), thumbnails_bucket, thumbnail_object_key
+            minio_client.upload_fileobj(
+                thumbnail_buffer, thumbnails_bucket, thumbnail_object_key
             )
             result["thumbnail_path"] = _build_s3_uri(
                 thumbnails_bucket, thumbnails_prefix, thumbnail_object_key
@@ -243,27 +258,20 @@ def _apply_image_transformations(
     images_df: DataFrame, run_directives: DictConfig
 ) -> DataFrame:
     images_df = images_df.copy()
-    minio_client, output_bucket, output_prefix = _get_minio_client(run_directives)
+    minio_client, input_bucket, _ = _get_minio_client(run_directives)
     output_uri = str(run_directives.get("output_path"))
     thumbnails_uri = str(run_directives.get("thumbnails_path"))
     thumbnails_bucket, thumbnails_prefix = _parse_s3_uri(thumbnails_uri)
-    resolved_output_bucket, resolved_output_prefix = _parse_s3_uri(output_uri)
-    output_dir, thumbnails_dir = _resolve_output_paths(run_directives)
+    output_bucket, output_prefix = _parse_s3_uri(output_uri)
 
     thumbnail_width = int(run_directives.get("thumbnail_width", 256))
     thumbnail_height = int(run_directives.get("thumbnail_height", 256))
     thumbnail_size = (thumbnail_width, thumbnail_height)
 
-    if output_bucket != resolved_output_bucket or output_prefix != resolved_output_prefix:
-        output_bucket = resolved_output_bucket
-        output_prefix = resolved_output_prefix
-
     transform_results = [
         _correct_orientation_and_generate_thumbnail(
-            image_path=Path(image_path),
+            image_bytes=_get_image_bytes(minio_client, input_bucket, str(object_key)),
             source_key=str(source_key),
-            thumbnails_dir=thumbnails_dir,
-            output_dir=output_dir,
             thumbnail_size=thumbnail_size,
             minio_client=minio_client,
             output_bucket=output_bucket,
@@ -271,8 +279,8 @@ def _apply_image_transformations(
             thumbnails_bucket=thumbnails_bucket,
             thumbnails_prefix=thumbnails_prefix,
         )
-        for image_path, source_key in zip(
-            images_df["image_path"], images_df["source_key"]
+        for object_key, source_key in zip(
+            images_df["object_key"], images_df["source_key"]
         )
     ]
 
@@ -298,7 +306,7 @@ def _apply_image_transformations(
 def _save_dataframe_to_postgresql(
     images_df: DataFrame, run_directives: DictConfig
 ) -> None:
-    postgres_cfg = run_directives.get("postgres")
+    postgres_cfg = run_directives.get("postgres_cfg")
     if postgres_cfg is None:
         raise ValueError("Missing 'postgres' section in run directives.")
 
@@ -316,7 +324,7 @@ def _save_dataframe_to_postgresql(
 def preprocessing_task(run_directives: DictConfig) -> DataFrame:
     image_paths = _list_input_images(run_directives)
     images_df = _build_images_dataframe(image_paths)
-    images_df = _add_hash_metadata(images_df)
+    images_df = _add_hash_metadata(images_df, run_directives)
     images_df = _apply_image_transformations(images_df, run_directives)
     _save_dataframe_to_postgresql(images_df, run_directives)
 
