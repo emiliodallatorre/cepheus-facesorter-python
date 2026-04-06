@@ -1,5 +1,20 @@
 #!/usr/bin/env bash
 export PREFECT_API_URL=http://localhost:4200/api
 
-uv run python scripts/deploy_flow.py
-uv run prefect deployment run "face-clustering-flow/default" --params '{"config_path":"run_directives/default.yml"}'
+CONFIG_PATH=${CONFIG_PATH:-run_directives/default.yml}
+
+RUN_DIRECTIVES_JSON=$(uv run python - <<'PY'
+from omegaconf import OmegaConf
+import json
+import os
+
+cfg = OmegaConf.load(os.getenv("CONFIG_PATH", "run_directives/default.yml"))
+print(json.dumps(OmegaConf.to_container(cfg, resolve=True)))
+PY
+)
+
+echo "Using configuration from $CONFIG_PATH"
+echo "Run directives JSON: $RUN_DIRECTIVES_JSON"
+
+uv run python scripts/deploy_flow.py --config "$CONFIG_PATH"
+uv run prefect deployment run "face-clustering-flow/default" --params "{\"run_directives\":$RUN_DIRECTIVES_JSON}"
