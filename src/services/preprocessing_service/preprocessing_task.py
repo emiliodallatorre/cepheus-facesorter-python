@@ -14,7 +14,7 @@ from pandas import DataFrame
 from PIL import Image, ImageOps
 from botocore import UNSIGNED
 from botocore.config import Config
-from prefect import flow, task
+from prefect import flow, get_run_logger, task
 from sqlalchemy import create_engine
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -108,6 +108,12 @@ def _get_image_bytes(minio_client: Any, bucket: str, object_key: str) -> bytes:
 @task(name="list_input_images")
 def _list_input_images(run_directives: DictConfig) -> list[dict[str, str]]:
     minio_client, bucket, prefix = _get_minio_client(run_directives)
+    logger = get_run_logger()
+    logger.info(
+        "Scanning MinIO bucket '%s' with prefix '%s' for input images.",
+        bucket,
+        prefix or "/",
+    )
 
     paginator = minio_client.get_paginator("list_objects_v2")
     image_records: list[dict[str, str]] = []
@@ -133,7 +139,9 @@ def _list_input_images(run_directives: DictConfig) -> list[dict[str, str]]:
                     "source_key": relative_key.as_posix(),
                 }
             )
+            logger.info("Queued input image: %s", object_key)
 
+    logger.info("Discovered %d image(s) to preprocess.", len(image_records))
     return sorted(image_records, key=lambda record: record["source_key"])
 
 
@@ -168,10 +176,17 @@ def _compute_object_sha256(minio_client: Any, bucket: str, object_key: str) -> s
 def _add_hash_metadata(images_df: DataFrame, run_directives: DictConfig) -> DataFrame:
     images_df = images_df.copy()
     minio_client, bucket, _ = _get_minio_client(run_directives)
-    images_df["image_hash"] = [
-        _compute_object_sha256(minio_client, bucket, str(object_key))
-        for object_key in images_df["object_key"]
-    ]
+    logger = get_run_logger()
+    total = len(images_df.index)
+
+    hashes: list[str] = []
+    for index, object_key in enumerate(images_df["object_key"], start=1):
+        object_key_str = str(object_key)
+        logger.info("[%d/%d] Computing hash for %s", index, total, object_key_str)
+        hashes.append(_compute_object_sha256(minio_client, bucket, object_key_str))
+
+    images_df["image_hash"] = hashes
+    logger.info("Completed hashing for %d image(s).", total)
     return images_df
 
 
@@ -259,6 +274,7 @@ def _apply_image_transformations(
 ) -> DataFrame:
     images_df = images_df.copy()
     minio_client, input_bucket, _ = _get_minio_client(run_directives)
+    logger = get_run_logger()
     output_uri = str(run_directives.get("output_path"))
     thumbnails_uri = str(run_directives.get("thumbnails_path"))
     thumbnails_bucket, thumbnails_prefix = _parse_s3_uri(thumbnails_uri)
@@ -268,10 +284,20 @@ def _apply_image_transformations(
     thumbnail_height = int(run_directives.get("thumbnail_height", 256))
     thumbnail_size = (thumbnail_width, thumbnail_height)
 
-    transform_results = [
-        _correct_orientation_and_generate_thumbnail(
-            image_bytes=_get_image_bytes(minio_client, input_bucket, str(object_key)),
-            source_key=str(source_key),
+    total = len(images_df.index)
+    transform_results: list[dict[str, Any]] = []
+    for index, (object_key, source_key) in enumerate(
+        zip(images_df["object_key"], images_df["source_key"]), start=1
+    ):
+        object_key_str = str(object_key)
+        source_key_str = str(source_key)
+        logger.info(
+            "[%d/%d] Processing image %s", index, total, object_key_str
+        )
+
+        result = _correct_orientation_and_generate_thumbnail(
+            image_bytes=_get_image_bytes(minio_client, input_bucket, object_key_str),
+            source_key=source_key_str,
             thumbnail_size=thumbnail_size,
             minio_client=minio_client,
             output_bucket=output_bucket,
@@ -279,10 +305,26 @@ def _apply_image_transformations(
             thumbnails_bucket=thumbnails_bucket,
             thumbnails_prefix=thumbnails_prefix,
         )
-        for object_key, source_key in zip(
-            images_df["object_key"], images_df["source_key"]
-        )
-    ]
+
+        if result.get("preprocessing_error"):
+            logger.warning(
+                "[%d/%d] Failed processing %s: %s",
+                index,
+                total,
+                object_key_str,
+                result.get("preprocessing_error"),
+            )
+        else:
+            logger.info(
+                "[%d/%d] Uploaded outputs for %s",
+                index,
+                total,
+                object_key_str,
+            )
+
+        transform_results.append(result)
+
+    logger.info("Completed transform/upload step for %d image(s).", total)
 
     transform_results = pd.Series(transform_results, index=images_df.index)
 
